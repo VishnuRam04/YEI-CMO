@@ -1,0 +1,4 @@
+{
+  "input": { "from": "2026-05-01T00:00:00.000Z", "to": "2026-08-01T00:00:00.000Z" },
+  "expected": { "underpoweredSampleIsHedged": true }
+}

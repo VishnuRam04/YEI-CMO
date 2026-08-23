@@ -1,0 +1,108 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Brand {
+  id        String    @id @default(cuid())
+  name      String
+  url       String
+  kernel    Json
+  voice     Json
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  plans     Plan[]
+  assets    Asset[]
+  metrics   Metric[]
+  patterns  Pattern[]
+  directives StrategicDirective[]
+}
+
+model Plan {
+  id        String     @id @default(cuid())
+  brandId   String
+  brand     Brand      @relation(fields: [brandId], references: [id])
+  weekOf    DateTime
+  createdAt DateTime   @default(now())
+  items     PlanItem[]
+}
+
+model PlanItem {
+  id        String   @id @default(cuid())
+  planId    String
+  plan      Plan     @relation(fields: [planId], references: [id])
+  channel   String
+  format    String
+  hook      String
+  pillar    String
+  rationale String   @db.Text
+  status    String   @default("idea")
+  assets    Asset[]
+}
+
+model Asset {
+  id         String    @id @default(cuid())
+  brandId    String
+  brand      Brand     @relation(fields: [brandId], references: [id])
+  planItemId String?
+  planItem   PlanItem? @relation(fields: [planItemId], references: [id])
+  channel    String
+  angle      String
+  body       String    @db.Text
+  mediaUrl   String?
+  mediaType  String?
+  score      Int?
+  subScores  Json?
+  reasons    Json?
+  usedKernel Boolean   @default(true)
+  status     String    @default("draft")
+  createdAt  DateTime  @default(now())
+
+  @@index([brandId, createdAt])
+}
+
+model Metric {
+  id          String   @id @default(cuid())
+  brandId     String
+  brand       Brand    @relation(fields: [brandId], references: [id])
+  date        DateTime
+  channel     String
+  format      String
+  pillar      String
+  impressions Int
+  clicks      Int
+  spend       Float
+  conversions Int
+  @@index([brandId, date])
+}
+
+model Pattern {
+  id        String   @id @default(cuid())
+  brandId   String
+  brand     Brand    @relation(fields: [brandId], references: [id])
+  dimension String
+  condition String
+  outcome   String
+  lift      Float
+  n         Int
+  createdAt DateTime @default(now())
+
+  @@index([brandId, dimension])
+}
+
+model StrategicDirective {
+  id        String   @id @default(cuid())
+  brandId   String
+  brand     Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  statement String   @db.Text
+  rationale String   @db.Text
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([brandId, active])
+}

@@ -1,0 +1,4 @@
+{
+  "input": { "message": "Write three launch posts", "recentActivity": [] },
+  "output": { "intent": "generate", "delegations": ["copywriter"] }
+}

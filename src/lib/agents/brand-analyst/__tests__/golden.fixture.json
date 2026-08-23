@@ -1,0 +1,4 @@
+{
+  "input": { "url": "https://example.com", "forceRefresh": false },
+  "expected": { "icpCount": 2, "exemplarCount": 5 }
+}
