@@ -1,4 +1,99 @@
 {
-  "input": { "url": "https://example.com", "forceRefresh": false },
-  "expected": { "icpCount": 2, "exemplarCount": 5 }
+  "input": {
+    "companyName": "Northwind Labs",
+    "sources": [
+      {
+        "id": "official-site",
+        "kind": "website",
+        "url": "https://northwind.example",
+        "label": "official-website"
+      },
+      {
+        "id": "founder-notes",
+        "kind": "text",
+        "label": "approved-copy",
+        "title": "Founder notes",
+        "content": "Northwind gives lean B2B marketing teams an operating layer for strategy and execution."
+      }
+    ],
+    "forceRefresh": false
+  },
+  "modelResult": {
+    "brandName": "Northwind Labs",
+    "kernel": {
+      "positioning": "An AI operating layer for lean B2B marketing teams.",
+      "category": "Agentic marketing intelligence",
+      "icps": [
+        {
+          "name": "B2B marketing leaders",
+          "needs": ["Senior-level strategy without adding headcount"]
+        },
+        {
+          "name": "Lean growth teams",
+          "needs": ["Consistent execution grounded in one brand memory"]
+        }
+      ],
+      "differentiators": [
+        "Persistent brand memory",
+        "Specialist marketing agents",
+        "A measurable learning loop"
+      ],
+      "objections": [
+        {
+          "objection": "AI content may sound generic.",
+          "rebuttal": "Every agent works from the confirmed Brand Kernel."
+        },
+        {
+          "objection": "The system may add operational overhead.",
+          "rebuttal": "A single workspace coordinates strategy and execution."
+        },
+        {
+          "objection": "Results may be difficult to measure.",
+          "rebuttal": "Performance patterns feed the next planning cycle."
+        }
+      ],
+      "proofPoints": ["Specialist agents share one durable brand memory"],
+      "competitors": []
+    },
+    "voice": {
+      "toneAxes": {
+        "measuredToBold": 4,
+        "technicalToPlain": 4,
+        "seriousToPlayful": 2
+      },
+      "do": ["Use precise operational language", "Connect claims to outcomes"],
+      "dont": ["Use unsupported superlatives", "Sound like generic AI copy"],
+      "bannedWords": ["revolutionary"],
+      "exemplars": [
+        "An operating layer for strategy and execution.",
+        "Senior-level strategy without adding headcount.",
+        "One durable source of brand truth.",
+        "Specialist agents working from shared memory.",
+        "A measurable learning loop for lean teams."
+      ]
+    },
+    "visualIdentity": {
+      "logo": null,
+      "colors": [],
+      "typographyCharacteristics": [],
+      "motifs": [],
+      "usageNotes": ["No authoritative visual source was supplied."]
+    },
+    "evidence": [
+      {
+        "field": "kernel.positioning",
+        "sourceId": "founder-notes",
+        "excerptOrObservation": "an operating layer for strategy and execution",
+        "confidence": 0.96
+      },
+      {
+        "field": "kernel.icps",
+        "sourceId": "founder-notes",
+        "excerptOrObservation": "lean B2B marketing teams",
+        "confidence": 0.95
+      }
+    ],
+    "conflicts": [],
+    "missingInformation": ["Authoritative logo and color guidance"]
+  }
 }
