@@ -1,4 +1,53 @@
 {
-  "input": { "channel": "linkedin", "brief": "Launch", "usedKernel": true },
-  "expectedAngles": ["pain-led", "proof-led", "contrarian"]
+  "input": {
+    "brandId": "brand_acme_robotics",
+    "traceId": "trace_golden_001",
+    "payload": {
+      "mode": "text",
+      "channel": "linkedin",
+      "brief": "Announce that Acme Robotics closed a $12M Series A led by Northgate Ventures, to fund expansion into Southeast Asian warehouses."
+    }
+  },
+  "output": {
+    "agentId": "copywriter",
+    "traceId": "trace_golden_001",
+    "ok": true,
+    "result": {
+      "kind": "text",
+      "variants": [
+        {
+          "angle": "pain-led",
+          "channel": "linkedin",
+          "usedKernel": true,
+          "body": "Most warehouse robots fail within 18 months in humid climates. We built Acme to survive Jakarta's wet season from day one — and today, that bet gets $12M behind it.\n\nWe're closing a $12M Series A led by Northgate Ventures to bring humidity-hardened robotics to warehouses across Southeast Asia.\n\nMore soon.",
+          "hashtags": ["#WarehouseRobotics", "#SeriesA", "#SoutheastAsia"]
+        },
+        {
+          "angle": "proof-led",
+          "channel": "linkedin",
+          "usedKernel": true,
+          "body": "14 warehouses. Zero rust-related failures. That track record just closed our $12M Series A, led by Northgate Ventures.\n\nThe capital funds expansion across Southeast Asia, where humidity has quietly been the industry's biggest reliability problem.\n\nGrateful to the team and to Northgate for betting on hard-climate engineering.",
+          "hashtags": ["#Robotics", "#SeriesA"]
+        },
+        {
+          "angle": "contrarian",
+          "channel": "linkedin",
+          "usedKernel": true,
+          "body": "Everyone in warehouse robotics optimizes for speed. We optimized for humidity.\n\nTurns out that was the right call: we just closed a $12M Series A led by Northgate Ventures to bring climate-hardened robots to Southeast Asia, where 'fast' robots keep failing in month two.\n\nSometimes the boring engineering problem is the real one.",
+          "hashtags": ["#Robotics", "#Engineering"]
+        }
+      ]
+    },
+    "summary": "3 variants · pain-led/proof-led/contrarian",
+    "telemetry": {
+      "model": "gemini-3.6-flash",
+      "inputTokens": 612,
+      "outputTokens": 384,
+      "costUsd": 0.001899,
+      "latencyMs": 2140,
+      "startedAt": "2026-08-20T09:12:03.000Z",
+      "finishedAt": "2026-08-20T09:12:05.140Z"
+    },
+    "error": null
+  }
 }
