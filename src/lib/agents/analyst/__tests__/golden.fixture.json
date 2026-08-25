@@ -1,4 +1,38 @@
 {
-  "input": { "from": "2026-05-01T00:00:00.000Z", "to": "2026-08-01T00:00:00.000Z" },
-  "expected": { "underpoweredSampleIsHedged": true }
+  "input": {
+    "brandId": "brand_123",
+    "traceId": "trace_123",
+    "payload": {
+      "from": "2026-07-01T00:00:00.000Z",
+      "to": "2026-08-01T00:00:00.000Z"
+    }
+  },
+  "expected": {
+    "ok": true,
+    "summary": "Founder stories + CPL",
+    "patterns": [
+      {
+        "dimension": "format",
+        "condition": "Founder-story format",
+        "lift": 3.1,
+        "n": 34,
+        "confidence": "supported"
+      },
+      {
+        "dimension": "channel",
+        "condition": "LinkedIn acquisition costs",
+        "lift": 1.4,
+        "n": 88,
+        "confidence": "supported"
+      },
+      {
+        "dimension": "creative",
+        "condition": "Email subject testing",
+        "lift": 0.7,
+        "n": 8,
+        "confidence": "directional"
+      }
+    ],
+    "hasHedgedLowSample": true
+  }
 }
