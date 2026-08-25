@@ -1,253 +1,416 @@
-import { streamText, generateText, Output } from 'ai';
-import { put } from '@vercel/blob'; // swap for your R2 client if that's what 02-dev-plan.md settled on
-
-import type { Agent, AgentInput, AgentOutput, AgentError } from '@/lib/agents/types'; // 🔒 lead-owned, do not edit
-import { model, MODELS } from '@/lib/agents/models'; // 🔒 lead-owned
-import { computeCost } from '@/lib/agents/cost'; // 🔒 lead-owned
-import { getDb } from '@/lib/db';
-
+import { put } from "@vercel/blob";
+import { generateText, NoObjectGeneratedError, Output, streamText } from "ai";
+import { getDb } from "@/lib/db";
+import { MODELS, model } from "@/lib/agents/models";
+import { agentFailure, agentSuccess } from "@/lib/agents/output";
+import type { Agent, AgentInput, AgentOutput } from "@/lib/agents/types";
+import { buildImagePrompt, buildSystemPrompt, buildUserPrompt } from "./prompt";
 import {
+  CHANNEL_CONSTRAINTS,
   VariantsSchema,
-  isTextPayload,
   isImagePayload,
+  isTextPayload,
   type CopywriterPayload,
   type CopywriterResult,
+  type ImageGenerationPayload,
+  type TextGenerationPayload,
   type TextVariant,
-} from './schema';
-import { buildSystemPrompt, buildUserPrompt, buildImagePrompt } from './prompt';
+} from "./schema";
 
-const db = getDb();
+type JsonRecord = Record<string, unknown>;
 
-export const copywriterAgent: Agent<CopywriterPayload, CopywriterResult> = {
-  id: 'copywriter',
-  model: MODELS.copywriter, // text default; image calls override at call time
+function record(value: unknown): JsonRecord {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as JsonRecord)
+    : {};
+}
 
-  async run(input: AgentInput<CopywriterPayload>): Promise<AgentOutput<CopywriterResult>> {
-    const startedAt = new Date();
+function text(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
 
-    try {
-      if (isTextPayload(input.payload)) {
-        return await runTextGeneration(input, startedAt);
-      }
-      if (isImagePayload(input.payload)) {
-        return await runImageGeneration(input, startedAt);
-      }
-      // Exhaustiveness guard — schema should make this unreachable.
-      return errorOutput(input, startedAt, {
-        code: 'VALIDATION_ERROR',
-        message: 'Unrecognised copywriter payload mode.',
-        retryable: false,
-      });
-    } catch (err) {
-      // Belt-and-suspenders: runAgent() catches escapes per §9, but we keep
-      // our own error context rather than relying on that alone.
-      return errorOutput(input, startedAt, {
-        code: 'MODEL_ERROR',
-        message: 'The copywriter agent failed to generate a response. Please try again.',
-        detail: err instanceof Error ? err.stack ?? err.message : String(err),
-        retryable: true,
-      });
-    }
-  },
-};
+function strings(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+    : [];
+}
 
-// TEXT — structured output via Output.object (§6 standard pattern)
-
-async function runTextGeneration(
-  input: AgentInput<CopywriterPayload>,
-  startedAt: Date,
-): Promise<AgentOutput<CopywriterResult>> {
-  const payload = input.payload;
-  if (!isTextPayload(payload)) throw new Error('runTextGeneration called with non-text payload');
-
-  const usedKernel = payload.usedKernel ?? true;
-  const brand = await db.brand.findUniqueOrThrow({ where: { id: input.brandId } });
-
-  const result = streamText({
-    model: model(MODELS.copywriter),
-    system: buildSystemPrompt(brand.kernel, brand.voice, usedKernel),
-    prompt: buildUserPrompt(payload),
-    output: Output.object({ schema: VariantsSchema }),
-  });
-
-  // §7: emit `state: 'working'` on first token, not on request start. If
-  // this agent is invoked from the streaming API route, that route should
-  // consume `result.fullStream` / `result.textStream` itself and emit the
-  // AgentEvent shape as chunks arrive; run() here just awaits completion
-  // for the final structured object + usage. See streamCopywriterText()
-  // below, which the route can call INSTEAD of run() for the live SSE path.
-  const object = await result.output;
-  const usage = await result.usage;
-  const finishedAt = new Date();
-
-  const parsed = VariantsSchema.safeParse(object);
-  if (!parsed.success) {
-    return errorOutput(input, startedAt, {
-      code: 'VALIDATION_ERROR',
-      message: 'The model returned copy in an unexpected shape. Please retry.',
-      detail: parsed.error.message,
-      retryable: true,
-    });
-  }
-
-  const variants: TextVariant[] = parsed.data.variants.map((v) => ({
-    ...v,
-    channel: payload.channel,
-    usedKernel,
-  }));
-
-  // Persist as Asset rows — one per variant, per §10's "Writes Asset rows
-  // with angle, body, usedKernel".
-  await db.asset.createMany({
-    data: variants.map((v) => ({
-      brandId: input.brandId,
-      channel: v.channel,
-      angle: v.angle,
-      body: v.body,
-      subject: v.subject ?? null,
-      preheader: v.preheader ?? null,
-      hashtags: v.hashtags ?? [],
-      usedKernel: v.usedKernel,
-    })),
-  });
-
-  const costUsd = computeCost(MODELS.copywriter, usage.inputTokens ?? 0, usage.outputTokens ?? 0);
+function brandMemory(brand: { name: string; kernel: unknown; voice: unknown }) {
+  const storedKernel = record(brand.kernel);
+  const storedVoice = record(brand.voice);
+  const visualIdentity = record(storedKernel.visualIdentity);
+  const colors = Array.isArray(visualIdentity.colors)
+    ? visualIdentity.colors
+        .map((value) => text(record(value).hex, ""))
+        .filter(Boolean)
+    : [];
+  const styleParts = [
+    ...strings(visualIdentity.motifs),
+    ...strings(visualIdentity.typographyCharacteristics),
+  ];
 
   return {
-    agentId: 'copywriter',
-    traceId: input.traceId,
-    ok: true,
-    result: { kind: 'text', variants },
-    summary: summariseVariants(variants),
-    telemetry: {
-      model: MODELS.copywriter,
-      inputTokens: usage.inputTokens ?? 0,
-      outputTokens: usage.outputTokens ?? 0,
-      costUsd,
-      latencyMs: finishedAt.getTime() - startedAt.getTime(),
-      startedAt: startedAt.toISOString(),
-      finishedAt: finishedAt.toISOString(),
+    kernel: {
+      name: brand.name,
+      positioning: text(
+        storedKernel.positioning,
+        "No approved positioning statement is available.",
+      ),
+      category: text(storedKernel.category, ""),
+      icps: Array.isArray(storedKernel.icps)
+        ? storedKernel.icps.flatMap((value) => {
+            const item = record(value);
+            const name = text(item.name, "");
+            return name ? [{ name, needs: strings(item.needs) }] : [];
+          })
+        : [],
+      differentiators: strings(storedKernel.differentiators),
+      proofPoints: strings(storedKernel.proofPoints),
     },
-    error: null,
+    voice: {
+      toneAxes: Object.fromEntries(
+        Object.entries(record(storedVoice.toneAxes)).filter(
+          (entry): entry is [string, number] => typeof entry[1] === "number",
+        ),
+      ),
+      do: strings(storedVoice.do),
+      dont: strings(storedVoice.dont),
+      bannedWords: strings(storedVoice.bannedWords),
+      exemplars: strings(storedVoice.exemplars),
+    },
+    visualKit: {
+      palette: colors.length ? colors : ["No confirmed palette"],
+      styleFragment: styleParts.length
+        ? styleParts.join("; ")
+        : "No confirmed visual style; keep the composition clean and restrained.",
+      logoSafeArea:
+        strings(visualIdentity.usageNotes).join("; ") ||
+        "No confirmed logo safe-area rule; do not fabricate or redraw a logo.",
+    },
   };
 }
 
-function summariseVariants(variants: TextVariant[]): string {
-  const s = `${variants.length} variants · ${variants.map((v) => v.angle).join('/')}`;
-  return s.length <= 40 ? s : `${variants.length} variants generated`;
+function validateForChannel(
+  payload: TextGenerationPayload,
+  variants: TextVariant[],
+  bannedWords: string[],
+): string | undefined {
+  const constraints = CHANNEL_CONSTRAINTS[payload.channel];
+  for (const variant of variants) {
+    if (variant.body.length > constraints.maxChars) {
+      return `${variant.angle} exceeds the ${constraints.maxChars}-character ${payload.channel} limit.`;
+    }
+    if (payload.channel === "email" && (!variant.subject || !variant.preheader)) {
+      return `${variant.angle} is missing the required email subject or preheader.`;
+    }
+    const completeCopy = [variant.subject, variant.preheader, variant.body]
+      .filter(Boolean)
+      .join(" ")
+      .toLocaleLowerCase();
+    const bannedWord = bannedWords.find((word) =>
+      completeCopy.includes(word.toLocaleLowerCase()),
+    );
+    if (bannedWord) {
+      return `${variant.angle} contains banned language: ${bannedWord}.`;
+    }
+  }
+  return undefined;
+}
+
+function persistedText(variant: TextVariant): string {
+  const metadata = [
+    variant.subject ? `Subject: ${variant.subject}` : "",
+    variant.preheader ? `Preheader: ${variant.preheader}` : "",
+  ].filter(Boolean);
+  const hashtags = variant.hashtags?.length ? `\n\n${variant.hashtags.join(" ")}` : "";
+  return `${metadata.length ? `${metadata.join("\n")}\n\n` : ""}${variant.body}${hashtags}`;
+}
+
+async function runTextGeneration(
+  input: AgentInput<CopywriterPayload>,
+  payload: TextGenerationPayload,
+): Promise<AgentOutput<CopywriterResult>> {
+  const brand = await getDb().brand.findUnique({
+    where: { id: input.brandId },
+    select: { name: true, kernel: true, voice: true },
+  });
+  if (!brand) {
+    return agentFailure({
+      agentId: "copywriter",
+      traceId: input.traceId,
+      model: MODELS.copywriter,
+      summary: "Brand memory not found",
+      error: {
+        code: "INPUT_ERROR",
+        message: "Build brand memory before generating copy.",
+        retryable: false,
+      },
+    });
+  }
+
+  const memory = brandMemory(brand);
+  const usedKernel = payload.usedKernel ?? true;
+  const generation = streamText({
+    model: model(MODELS.copywriter),
+    instructions: buildSystemPrompt(memory.kernel, memory.voice, usedKernel),
+    prompt: buildUserPrompt(payload),
+    output: Output.object({ schema: VariantsSchema }),
+    temperature: 0.7,
+    maxOutputTokens: 3_000,
+    maxRetries: 1,
+    timeout: { totalMs: 18_000, firstChunkMs: 12_000, chunkMs: 8_000 },
+    providerOptions: {
+      google: { thinkingConfig: { thinkingLevel: "low" } },
+    },
+  });
+
+  let object;
+  let usage;
+  try {
+    [object, usage] = await Promise.all([generation.output, generation.usage]);
+  } catch (error) {
+    return agentFailure({
+      agentId: "copywriter",
+      traceId: input.traceId,
+      model: MODELS.copywriter,
+      summary: "Copy validation failed",
+      error: {
+        code: NoObjectGeneratedError.isInstance(error)
+          ? "VALIDATION_ERROR"
+          : "MODEL_ERROR",
+        message: NoObjectGeneratedError.isInstance(error)
+          ? "Gemini returned copy in an unexpected format. Please retry."
+          : "Gemini could not generate copy. Please retry.",
+        detail: error instanceof Error ? error.message : String(error),
+        retryable: true,
+      },
+    });
+  }
+
+  const parsed = VariantsSchema.safeParse(object);
+  if (!parsed.success) {
+    return agentFailure({
+      agentId: "copywriter",
+      traceId: input.traceId,
+      model: MODELS.copywriter,
+      summary: "Copy validation failed",
+      error: {
+        code: "VALIDATION_ERROR",
+        message: "Gemini returned copy in an unexpected format. Please retry.",
+        detail: parsed.error.message,
+        retryable: true,
+      },
+    });
+  }
+
+  const variants: TextVariant[] = parsed.data.variants.map((variant) => ({
+    ...variant,
+    body: variant.body.replace(/\s+(?:#[\p{L}\p{N}_-]+\s*)+$/u, "").trim(),
+    channel: payload.channel,
+    hashtags:
+      payload.channel === "email"
+        ? undefined
+        : variant.hashtags?.map((hashtag) =>
+            hashtag.startsWith("#") ? hashtag : `#${hashtag}`,
+          ),
+    usedKernel,
+  }));
+  const channelError = validateForChannel(
+    payload,
+    variants,
+    memory.voice.bannedWords,
+  );
+  if (channelError) {
+    return agentFailure({
+      agentId: "copywriter",
+      traceId: input.traceId,
+      model: MODELS.copywriter,
+      summary: "Channel validation failed",
+      error: {
+        code: "VALIDATION_ERROR",
+        message: channelError,
+        retryable: true,
+      },
+    });
+  }
+
+  await getDb().asset.createMany({
+    data: variants.map((variant) => ({
+      brandId: input.brandId,
+      channel: variant.channel,
+      angle: variant.angle,
+      body: persistedText(variant),
+      usedKernel: variant.usedKernel,
+    })),
+  });
+
+  return agentSuccess({
+    agentId: "copywriter",
+    traceId: input.traceId,
+    model: MODELS.copywriter,
+    result: { kind: "text", variants },
+    summary: `3 variants - ${variants.map((variant) => variant.angle).join("/")}`,
+    inputTokens: usage.inputTokens ?? 0,
+    outputTokens: usage.outputTokens ?? 0,
+  });
 }
 
 const IMAGE_MODEL_BY_TIER = {
-  draft: 'gemini-3.1-flash-lite-image',
-  default: MODELS.copywriterImage, // 'gemini-3.1-flash-image'
-  hero: 'gemini-3-pro-image',
+  draft: "gemini-3.1-flash-lite-image",
+  default: MODELS.copywriterImage,
+  hero: "gemini-3-pro-image",
 } as const;
+
+function imageExtension(mediaType: string): string {
+  if (mediaType === "image/jpeg") return "jpg";
+  if (mediaType === "image/webp") return "webp";
+  return "png";
+}
 
 async function runImageGeneration(
   input: AgentInput<CopywriterPayload>,
-  startedAt: Date,
+  payload: ImageGenerationPayload,
 ): Promise<AgentOutput<CopywriterResult>> {
-  const payload = input.payload;
-  if (!isImagePayload(payload)) throw new Error('runImageGeneration called with non-image payload');
+  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    return agentFailure({
+      agentId: "copywriter",
+      traceId: input.traceId,
+      model: MODELS.copywriter,
+      summary: "Image storage is not configured",
+      error: {
+        code: "INPUT_ERROR",
+        message: "Set BLOB_READ_WRITE_TOKEN before generating images.",
+        retryable: false,
+      },
+    });
+  }
 
-  const tier = payload.tier ?? 'default';
-  const imageModelId = IMAGE_MODEL_BY_TIER[tier];
-
-  const brand = await db.brand.findUniqueOrThrow({ where: { id: input.brandId } });
-  // visualKit is expected to live alongside kernel/voice on the Brand row.
-  // If it doesn't exist yet as a column, that's a 🔒 schema.prisma change —
-  // raise it with the lead per §3.3, don't bolt it onto Asset.body.
-  const prompt = buildImagePrompt(brand.kernel, brand.visualKit, payload.briefText);
-
-  const result = await generateText({
-    model: model(imageModelId),
-    prompt: payload.referenceImageUrls?.length
-      ? [
-          {
-            role: 'user' as const,
-            content: [
-              { type: 'text' as const, text: prompt },
-              ...payload.referenceImageUrls.map((url) => ({
-                type: 'image' as const,
-                image: url,
-              })),
-            ],
-          },
-        ]
-      : prompt,
+  const brand = await getDb().brand.findUnique({
+    where: { id: input.brandId },
+    select: { name: true, kernel: true, voice: true },
   });
+  if (!brand) {
+    return agentFailure({
+      agentId: "copywriter",
+      traceId: input.traceId,
+      model: MODELS.copywriter,
+      summary: "Brand memory not found",
+      error: {
+        code: "INPUT_ERROR",
+        message: "Build brand memory before generating an image.",
+        retryable: false,
+      },
+    });
+  }
 
-  const imageFile = result.files.find((f) => f.mediaType.startsWith('image/'));
+  const memory = brandMemory(brand);
+  const tier = payload.tier ?? "default";
+  const imageModel = IMAGE_MODEL_BY_TIER[tier];
+  const prompt = buildImagePrompt(memory.kernel, memory.visualKit, payload.briefText);
+  const modelPrompt = payload.referenceImageUrls?.length
+    ? [{
+        role: "user" as const,
+        content: [
+          { type: "text" as const, text: prompt },
+          ...payload.referenceImageUrls.map((url) => ({
+            type: "image" as const,
+            image: url,
+          })),
+        ],
+      }]
+    : prompt;
+  const generated = await generateText({
+    model: model(imageModel),
+    prompt: modelPrompt,
+    maxRetries: 1,
+    providerOptions: {
+      google: { responseModalities: ["IMAGE"] },
+    },
+  });
+  const imageFile = generated.files.find((file) => file.mediaType.startsWith("image/"));
   if (!imageFile) {
-    return errorOutput(input, startedAt, {
-      code: 'MODEL_ERROR',
-      message: 'The image model did not return an image. Please try again.',
-      retryable: true,
+    return agentFailure({
+      agentId: "copywriter",
+      traceId: input.traceId,
+      model: MODELS.copywriter,
+      summary: "Image generation failed",
+      error: {
+        code: "MODEL_ERROR",
+        message: "Gemini did not return an image. Please retry.",
+        retryable: true,
+      },
     });
   }
 
   const blob = await put(
-    `assets/${input.brandId}/${input.traceId}.png`,
+    `assets/${input.brandId}/${input.traceId}.${imageExtension(imageFile.mediaType)}`,
     Buffer.from(imageFile.uint8Array),
-    { access: 'public', contentType: imageFile.mediaType },
+    { access: "public", contentType: imageFile.mediaType },
   );
-
-  const finishedAt = new Date();
-
-  await db.asset.create({
+  await getDb().asset.create({
     data: {
       brandId: input.brandId,
-      channel: 'instagram', // adjust if images can target other channels
-      angle: 'image',
-      body: '', // Asset.body is text-only per §3.3 — image lives in mediaUrl
+      channel: "instagram",
+      angle: "image",
+      body: payload.briefText,
       mediaUrl: blob.url,
-      usedKernel: true, // no usedKernel:false mode for images this phase
+      mediaType: imageFile.mediaType,
+      usedKernel: true,
     },
   });
 
-  const usage = result.usage;
-  const costUsd = computeCost(imageModelId, usage.inputTokens ?? 0, usage.outputTokens ?? 0);
-
-  return {
-    agentId: 'copywriter',
+  return agentSuccess({
+    agentId: "copywriter",
     traceId: input.traceId,
-    ok: true,
-    result: { kind: 'image', imageUrl: blob.url, mimeType: imageFile.mediaType, tier },
-    summary: `1 image · ${tier}`,
-    telemetry: {
-      model: imageModelId,
-      inputTokens: usage.inputTokens ?? 0,
-      outputTokens: usage.outputTokens ?? 0,
-      costUsd,
-      latencyMs: finishedAt.getTime() - startedAt.getTime(),
-      startedAt: startedAt.toISOString(),
-      finishedAt: finishedAt.toISOString(),
+    model: MODELS.copywriter,
+    result: {
+      kind: "image",
+      imageUrl: blob.url,
+      mimeType: imageFile.mediaType,
+      tier,
     },
-    error: null,
-  };
+    summary: `1 image - ${tier}`,
+    inputTokens: generated.usage.inputTokens ?? 0,
+    outputTokens: generated.usage.outputTokens ?? 0,
+  });
 }
 
-function errorOutput(
-  input: AgentInput<CopywriterPayload>,
-  startedAt: Date,
-  error: AgentError,
-): AgentOutput<CopywriterResult> {
-  const finishedAt = new Date();
-  return {
-    agentId: 'copywriter',
-    traceId: input.traceId,
-    ok: false,
-    result: null,
-    summary: 'Generation failed',
-    telemetry: {
-      model: MODELS.copywriter,
-      inputTokens: 0,
-      outputTokens: 0,
-      costUsd: 0,
-      latencyMs: finishedAt.getTime() - startedAt.getTime(),
-      startedAt: startedAt.toISOString(),
-      finishedAt: finishedAt.toISOString(),
-    },
-    error,
-  };
-}
+export const copywriterAgent: Agent<CopywriterPayload, CopywriterResult> = {
+  id: "copywriter",
+  model: MODELS.copywriter,
+
+  async run(input) {
+    try {
+      if (isTextPayload(input.payload)) {
+        return await runTextGeneration(input, input.payload);
+      }
+      if (isImagePayload(input.payload)) {
+        return await runImageGeneration(input, input.payload);
+      }
+      return agentFailure({
+        agentId: "copywriter",
+        traceId: input.traceId,
+        model: MODELS.copywriter,
+        summary: "Invalid copywriter request",
+        error: {
+          code: "INPUT_ERROR",
+          message: "The copywriter mode is not supported.",
+          retryable: false,
+        },
+      });
+    } catch (error) {
+      return agentFailure({
+        agentId: "copywriter",
+        traceId: input.traceId,
+        model: MODELS.copywriter,
+        summary: "Copywriter failed",
+        error: {
+          code: "MODEL_ERROR",
+          message: "The copywriter could not complete this request.",
+          detail: error instanceof Error ? error.message : String(error),
+          retryable: true,
+        },
+      });
+    }
+  },
+};

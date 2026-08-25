@@ -1,113 +1,138 @@
-import { z } from 'zod';
+import { z } from "zod";
 
-export const CHANNELS = ['linkedin', 'instagram', 'email'] as const;
+export const CHANNELS = ["linkedin", "instagram", "email"] as const;
 export type Channel = (typeof CHANNELS)[number];
 
-export const ANGLES = ['pain-led', 'proof-led', 'contrarian'] as const;
+export const ANGLES = ["pain-led", "proof-led", "contrarian"] as const;
 export type Angle = (typeof ANGLES)[number];
 
-export const IMAGE_TIERS = ['draft', 'default', 'hero'] as const;
+export const IMAGE_TIERS = ["draft", "default", "hero"] as const;
 export type ImageTier = (typeof IMAGE_TIERS)[number];
-
 
 export const CHANNEL_CONSTRAINTS: Record<
   Channel,
-  { maxChars: number; hashtags: boolean; hasSubject: boolean; notes: string }
+  {
+    maxChars: number;
+    targetChars: string;
+    hashtags: boolean;
+    hasSubject: boolean;
+    notes: string;
+  }
 > = {
   linkedin: {
-    maxChars: 3000,
+    maxChars: 3_000,
+    targetChars: "500-900",
     hashtags: true,
     hasSubject: false,
-    notes: 'Hook in the first line (pre-"see more" cutoff, ~210 chars). 3-5 hashtags max, placed at the end.',
+    notes: 'Put the hook before the "see more" cutoff. Use 3-5 hashtags at the end.',
   },
   instagram: {
-    maxChars: 2200,
+    maxChars: 2_200,
+    targetChars: "400-800",
     hashtags: true,
     hasSubject: false,
-    notes: 'Caption only (no image generation logic here — see mode "image"). Hook first line. Hashtags: 5-10, end of caption.',
+    notes: "Lead with a strong first line. Use 5-10 relevant hashtags at the end.",
   },
   email: {
-    maxChars: 1200,
+    maxChars: 1_200,
+    targetChars: "250-600",
     hashtags: false,
     hasSubject: true,
-    notes: 'Requires subject (<= 60 chars) and preheader (<= 90 chars) in addition to body.',
+    notes: "Include a subject of at most 60 characters and preheader of at most 90.",
   },
 };
 
 export const VariantSchema = z.object({
   angle: z.enum(ANGLES),
-  body: z.string().min(1),
-  subject: z.string().max(60).optional(),
-  preheader: z.string().max(90).optional(),
-  hashtags: z.array(z.string()).optional(),
+  body: z.string().trim().min(1).max(3_000),
+  subject: z.string().trim().min(1).max(60).optional(),
+  preheader: z.string().trim().min(1).max(90).optional(),
+  hashtags: z.array(z.string().trim().min(1).max(100)).max(10).optional(),
 });
 
-export const VariantsSchema = z.object({
-  variants: z.array(VariantSchema).length(3),
-});
+export const VariantsSchema = z
+  .object({ variants: z.array(VariantSchema).length(3) })
+  .superRefine((value, context) => {
+    const angles = new Set(value.variants.map((variant) => variant.angle));
+    if (angles.size !== ANGLES.length) {
+      context.addIssue({
+        code: "custom",
+        message: "Return one pain-led, one proof-led, and one contrarian variant.",
+        path: ["variants"],
+      });
+    }
+  });
 
 export type VariantsModelOutput = z.infer<typeof VariantsSchema>;
 
 export interface RefineInstruction {
-  instruction: string; // e.g. "shorter", "less salesy"
+  instruction: string;
   priorText: string;
 }
 
+/** `mode` stays optional so existing CMO delegation payloads remain compatible. */
 export interface TextGenerationPayload {
-  mode: 'text';
+  mode?: "text";
   channel: Channel;
   brief: string;
-  /** Defaults to true. Set false only for the /proof no-brand comparison. */
   usedKernel?: boolean;
   refine?: RefineInstruction;
+  refinement?: string;
+  priorText?: string;
 }
 
 export interface ImageGenerationPayload {
-  mode: 'image';
+  mode: "image";
   briefText: string;
-  tier?: ImageTier; // defaults to 'default' -> gemini-3.1-flash-image
-  /** Brand logo / product shots passed as multimodal reference input. */
+  tier?: ImageTier;
   referenceImageUrls?: string[];
 }
 
 export type CopywriterPayload = TextGenerationPayload | ImageGenerationPayload;
 
-export const CopywriterPayloadSchema = z.discriminatedUnion('mode', [
-  z.object({
-    mode: z.literal('text'),
-    channel: z.enum(CHANNELS),
-    brief: z.string().min(1),
-    usedKernel: z.boolean().optional(),
-    refine: z.object({
-      instruction: z.string().min(1),
-      priorText: z.string().min(1),
-    }).optional(),
-  }),
-  z.object({
-    mode: z.literal('image'),
-    briefText: z.string().min(1),
-    tier: z.enum(IMAGE_TIERS).optional(),
-    referenceImageUrls: z.array(z.string().url()).optional(),
-  }),
-]);
+const textPayloadSchema = z.object({
+  mode: z.literal("text").optional(),
+  channel: z.enum(CHANNELS),
+  brief: z.string().trim().min(1).max(8_000),
+  usedKernel: z.boolean().default(true),
+  refine: z
+    .object({
+      instruction: z.string().trim().min(1).max(2_000),
+      priorText: z.string().trim().min(1).max(20_000),
+    })
+    .optional(),
+  refinement: z.string().trim().min(1).max(2_000).optional(),
+  priorText: z.string().trim().min(1).max(20_000).optional(),
+});
 
-export interface TextVariant {
-  angle: Angle;
+const imagePayloadSchema = z.object({
+  mode: z.literal("image"),
+  briefText: z.string().trim().min(1).max(8_000),
+  tier: z.enum(IMAGE_TIERS).default("default"),
+  referenceImageUrls: z
+    .array(z.url().refine((url) => ["http:", "https:"].includes(new URL(url).protocol)))
+    .max(10)
+    .default([]),
+});
+
+export const CopywriterPayloadSchema: z.ZodType<CopywriterPayload> =
+  z.discriminatedUnion("mode", [
+    textPayloadSchema.extend({ mode: z.literal("text") }),
+    imagePayloadSchema,
+  ]).or(textPayloadSchema);
+
+export interface TextVariant extends z.infer<typeof VariantSchema> {
   channel: Channel;
-  body: string;
-  subject?: string;
-  preheader?: string;
-  hashtags?: string[];
   usedKernel: boolean;
 }
 
 export interface TextGenerationResult {
-  kind: 'text';
+  kind: "text";
   variants: TextVariant[];
 }
 
 export interface ImageGenerationResult {
-  kind: 'image';
+  kind: "image";
   imageUrl: string;
   mimeType: string;
   tier: ImageTier;
@@ -115,10 +140,24 @@ export interface ImageGenerationResult {
 
 export type CopywriterResult = TextGenerationResult | ImageGenerationResult;
 
-// Narrowing helpers for index.ts
-export function isTextPayload(p: CopywriterPayload): p is TextGenerationPayload {
-  return p.mode === 'text';
+export function isTextPayload(
+  payload: CopywriterPayload,
+): payload is TextGenerationPayload {
+  return payload.mode !== "image";
 }
-export function isImagePayload(p: CopywriterPayload): p is ImageGenerationPayload {
-  return p.mode === 'image';
+
+export function isImagePayload(
+  payload: CopywriterPayload,
+): payload is ImageGenerationPayload {
+  return payload.mode === "image";
+}
+
+export function refinementFor(
+  payload: TextGenerationPayload,
+): RefineInstruction | undefined {
+  if (payload.refine) return payload.refine;
+  if (payload.refinement && payload.priorText) {
+    return { instruction: payload.refinement, priorText: payload.priorText };
+  }
+  return undefined;
 }

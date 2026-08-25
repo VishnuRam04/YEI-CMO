@@ -4,6 +4,10 @@ import { buildSystemPrompt, buildUserPrompt, buildImagePrompt } from '../prompt'
 const kernel = {
   name: 'Acme Robotics',
   positioning: 'The only warehouse robot built for humid climates.',
+  category: 'Warehouse robotics',
+  icps: [{ name: 'Operations leaders', needs: ['Reliable humid-climate operation'] }],
+  differentiators: ['Humidity-hardened components'],
+  proofPoints: ['Deployed in an approved Jakarta pilot'],
 };
 
 const voice = {
@@ -27,6 +31,7 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('synergy');
     expect(prompt).toContain('disrupt');
     expect(prompt).toContain(voice.exemplars[0]);
+    expect(prompt).toContain(kernel.proofPoints[0]);
   });
 
   it('omits every brand fact when usedKernel=false', () => {
@@ -49,6 +54,11 @@ describe('buildUserPrompt', () => {
     const prompt = buildUserPrompt({ mode: 'text', channel: 'email', brief: 'Launch the new SKU.' });
     expect(prompt).toContain('<brief>');
     expect(prompt).toContain('</brief>');
+  });
+
+  it('keeps hashtag metadata out of the generated body', () => {
+    const prompt = buildUserPrompt({ mode: 'text', channel: 'linkedin', brief: 'Launch.' });
+    expect(prompt).toContain('hashtags only in the "hashtags" array');
   });
 
   it('includes refinement instructions and prior text when refining', () => {
