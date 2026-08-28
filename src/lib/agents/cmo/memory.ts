@@ -65,6 +65,20 @@ export async function loadPendingClarification(
   return parsed.success ? parsed.data.clarification ?? null : null;
 }
 
+/** True when the previous assistant turn offered to build the detailed plan. */
+export async function loadPendingPlanOffer(
+  conversationId: string,
+): Promise<boolean> {
+  const latestAssistant = await getDb().cmoMessage.findFirst({
+    where: { conversationId, role: "assistant" },
+    orderBy: { createdAt: "desc" },
+    select: { response: true },
+  });
+  if (!latestAssistant?.response) return false;
+  const parsed = CmoResponseSchema.safeParse(latestAssistant.response);
+  return parsed.success ? parsed.data.planOffer : false;
+}
+
 export async function saveCmoExchange(input: {
   conversationId: string;
   userMessage: string;

@@ -1,4 +1,3 @@
-import type { AnalystResult } from "@/lib/agents/analyst/schema";
 import type {
   StrategistModelResult,
   StrategyExecutionPlan,
@@ -55,39 +54,58 @@ function evenlySpacedOffsets(totalDays: number, count: number): number[] {
 
 function assetTypes(channel: string): string[] {
   if (/instagram|facebook/i.test(channel)) {
-    return ["Launch reel", "Proof carousel", "Parent proof post", "FAQ story", "Reminder post", "Final-call story"];
+    return ["Short introduction video", "Photo carousel with real examples", "Customer story", "Questions and answers story", "Reminder post", "Last reminder story"];
   }
   if (/linkedin/i.test(channel)) {
-    return ["Point-of-view post", "Proof carousel", "Founder post", "FAQ post", "Case-study post", "Final CTA post"];
+    return ["Helpful advice post", "Photo carousel", "Owner story", "Common questions post", "Customer example", "Last reminder post"];
   }
   if (/email/i.test(channel)) {
-    return ["Launch email", "Proof email", "FAQ email", "Reminder email", "Objection email", "Final-call email"];
+    return ["Introduction email", "Customer example email", "Common questions email", "Reminder email", "Useful details email", "Last reminder email"];
   }
-  return ["Launch post", "Proof post", "Story post", "FAQ post", "Reminder post", "Final-call post"];
+  return ["Introduction post", "Real example post", "Customer story", "Common questions post", "Reminder post", "Last reminder post"];
 }
 
 const purposes = [
-  "Introduce the campaign promise and create qualified awareness.",
-  "Show concrete proof so the offer feels credible rather than promotional.",
-  "Make the outcome relatable through a customer or participant perspective.",
-  "Remove the highest-friction question before asking for action.",
-  "Restore attention and make the decision window clear.",
-  "Convert remaining intent with a direct, time-bound call to action.",
+  "Explain the offer and tell the right people what to do next.",
+  "Show a real example so people can trust the offer.",
+  "Help people see how the offer could help someone like them.",
+  "Answer a common question that may stop someone from taking action.",
+  "Remind interested people before they forget or the offer ends.",
+  "Give interested people one final, clear reason to contact the business.",
 ];
 
 const impacts = [
-  "Establish the offer and generate the first wave of qualified visits or messages.",
-  "Increase trust and reduce uncertainty around the promised outcome.",
-  "Help the target audience recognise themselves in the campaign.",
-  "Reduce avoidable drop-off caused by unanswered objections.",
-  "Bring interested prospects back into the conversion path.",
-  "Concentrate high-intent responses before the campaign closes.",
+  "Help more of the right people notice the offer and send the first enquiries.",
+  "Build trust by showing something real instead of making a broad claim.",
+  "Help potential customers see how the offer fits their needs.",
+  "Make it easier for interested people to decide whether to contact the business.",
+  "Bring interested people back while there is still time to act.",
+  "Encourage people who are already interested to message, call or book.",
 ];
+
+const actions = [
+  "Explain the offer in one short post. Say who it is for and end with one clear instruction, such as messaging, calling or booking.",
+  "Share one real photo, video, customer example or demonstration. Explain what it shows and avoid any claim the business cannot prove.",
+  "Tell one short customer story: what they needed, what happened and what changed. Ask permission before using a person's name or image.",
+  "Answer the most common question about the offer. Keep the answer short and finish with the same contact instruction used in the first post.",
+  "Remind people when the offer ends or when they should respond. Repeat the main benefit and make the contact details easy to find.",
+  "Post a final reminder. State the deadline, who the offer is for and the exact action people should take now.",
+];
+
+/**
+ * Only two facts about the Analyst snapshot affect the plan, so the plan can
+ * be rebuilt for a different option later without retaining the whole
+ * intelligence result.
+ */
+export interface PlanEvidence {
+  hasOwnedPerformance: boolean;
+  hasMarketEvidence: boolean;
+}
 
 export function buildExecutionPlan(options: {
   objective: string;
   strategy: StrategistModelResult;
-  intelligence: AnalystResult;
+  evidence: PlanEvidence;
   createdAt: string;
 }): StrategyExecutionPlan {
   const recommended = options.strategy.experiments.find((experiment) =>
@@ -105,8 +123,7 @@ export function buildExecutionPlan(options: {
     ? options.strategy.contentPillars.map((pillar) => pillar.name)
     : [recommended.title];
   const times = ["08:00", "12:30", "20:00", "08:00", "12:30", "20:00"];
-  const hasOwnedPerformance = options.intelligence.performanceSignals.length > 0;
-  const hasMarketEvidence = options.intelligence.marketSignals.length > 0;
+  const { hasOwnedPerformance, hasMarketEvidence } = options.evidence;
   const planningBasis = hasOwnedPerformance
     ? "owned-and-market-evidence" as const
     : hasMarketEvidence
@@ -124,7 +141,7 @@ export function buildExecutionPlan(options: {
       channel: recommended.channel,
       assetType: formats[index % formats.length],
       theme,
-      action: `${purposes[index % purposes.length]} Use the “${theme}” angle to deliver: ${recommended.approach}`.slice(0, 600),
+      action: actions[index % actions.length],
       purpose: purposes[index % purposes.length],
       expectedImpact: impacts[index % impacts.length],
       primaryMetric: recommended.primaryMetric,
@@ -138,7 +155,7 @@ export function buildExecutionPlan(options: {
     endDate: isoDate(end),
     timezone: "Brand local time",
     totalAssets,
-    cadence: `${totalAssets} scheduled assets across ${totalDays} days on ${recommended.channel}.`,
+    cadence: `${totalAssets} planned posts over ${totalDays} days on ${recommended.channel}.`,
     costLevel: recommended.costLevel,
     planningBasis,
     schedule,
@@ -148,8 +165,8 @@ export function buildExecutionPlan(options: {
       stopCondition: recommended.stopCondition,
       reviewDate: isoDate(end),
       timingBasis: hasOwnedPerformance
-        ? "Publish windows should be replaced by the strongest times in the imported performance data before launch."
-        : "Publish times are explicit test windows, not proven best times; update them after owned performance data is imported.",
+        ? "Change these suggested times to match the times that worked best in your uploaded results."
+        : "These posting times are a starting point. After the campaign, use your results to choose better times next time.",
     },
   };
 }

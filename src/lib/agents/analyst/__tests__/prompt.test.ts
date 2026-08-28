@@ -21,6 +21,7 @@ describe("Analyst prompts", () => {
       brandName: "Northwind",
       category: "Eyewear",
       positioning: "Accessible premium",
+      competitors: ["Example Optics"],
       performanceSignals: [],
       sourceTargets: ["TikTok Creative Center"],
       now: "2026-08-26T12:00:00.000Z",
@@ -28,6 +29,8 @@ describe("Analyst prompts", () => {
 
     expect(prompt).toContain("<source_targets>");
     expect(prompt).toContain("TikTok Creative Center");
+    expect(prompt).toContain("Example Optics");
+    expect(prompt).toContain("public websites, public social pages, visible offers and public ads");
     expect(prompt).toContain("active ad performed well");
     expect(prompt).toContain("Where category messaging, proof, offers or channel execution leave an exploitable gap");
     expect(prompt).toContain("Three evidence-backed ways this brand could stand out");

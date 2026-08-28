@@ -1,12 +1,18 @@
-import { put } from "@vercel/blob";
 import { generateText, NoObjectGeneratedError, Output, streamText } from "ai";
 import { getDb } from "@/lib/db";
+import { storeGeneratedImage } from "@/lib/media/store";
 import { MODELS, model } from "@/lib/agents/models";
 import { agentFailure, agentSuccess } from "@/lib/agents/output";
 import type { Agent, AgentInput, AgentOutput } from "@/lib/agents/types";
-import { buildImagePrompt, buildSystemPrompt, buildUserPrompt } from "./prompt";
+import {
+  buildImagePrompt,
+  buildPosterCopyPrompt,
+  buildSystemPrompt,
+  buildUserPrompt,
+} from "./prompt";
 import {
   CHANNEL_CONSTRAINTS,
+  PosterCopySchema,
   VariantsSchema,
   isImagePayload,
   isTextPayload,
@@ -50,11 +56,19 @@ function brandMemory(brand: { name: string; kernel: unknown; voice: unknown }) {
   const storedCatalogues = Array.isArray(storedKernel.productCatalogues)
     ? storedKernel.productCatalogues
     : [];
-  const colors = Array.isArray(visualIdentity.colors)
-    ? visualIdentity.colors
-        .map((value) => text(record(value).hex, ""))
-        .filter(Boolean)
+  // Roles matter for a poster: the primary carries the headline, accents the
+  // supporting shapes. A bare list of hexes loses that.
+  const colorEntries = Array.isArray(visualIdentity.colors)
+    ? visualIdentity.colors.flatMap((value) => {
+        const entry = record(value);
+        const hex = text(entry.hex, "");
+        return hex ? [{ hex, role: text(entry.role, "unknown") }] : [];
+      })
     : [];
+  const colors = colorEntries.map((entry) => entry.hex);
+  const storedLogo = record(visualIdentity.logo);
+  const logoText = strings(storedLogo.visibleText);
+  const logoTagline = text(storedLogo.tagline, "");
   const styleParts = [
     ...strings(visualIdentity.fontFamilies),
     ...strings(visualIdentity.motifs),
@@ -161,6 +175,16 @@ function brandMemory(brand: { name: string; kernel: unknown; voice: unknown }) {
     },
     visualKit: {
       palette: colors.length ? colors : ["No confirmed palette"],
+      paletteRoles: colorEntries,
+      motifs: strings(visualIdentity.motifs),
+      typography: strings(visualIdentity.typographyCharacteristics),
+      logoDescription: logoText.length || logoTagline
+        ? [
+            `Type: ${text(storedLogo.type, "unknown")}`,
+            logoText.length ? `Wording: ${logoText.join(" / ")}` : "",
+            logoTagline ? `Tagline: ${logoTagline}` : "",
+          ].filter(Boolean).join("; ")
+        : "",
       styleFragment: styleParts.length
         ? styleParts.join("; ")
         : "No confirmed visual style; keep the composition clean and restrained.",
@@ -342,30 +366,10 @@ const IMAGE_MODEL_BY_TIER = {
   hero: "gemini-3-pro-image",
 } as const;
 
-function imageExtension(mediaType: string): string {
-  if (mediaType === "image/jpeg") return "jpg";
-  if (mediaType === "image/webp") return "webp";
-  return "png";
-}
-
 async function runImageGeneration(
   input: AgentInput<CopywriterPayload>,
   payload: ImageGenerationPayload,
 ): Promise<AgentOutput<CopywriterResult>> {
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
-    return agentFailure({
-      agentId: "copywriter",
-      traceId: input.traceId,
-      model: MODELS.copywriter,
-      summary: "Image storage is not configured",
-      error: {
-        code: "INPUT_ERROR",
-        message: "Set BLOB_READ_WRITE_TOKEN before generating images.",
-        retryable: false,
-      },
-    });
-  }
-
   const brand = await getDb().brand.findUnique({
     where: { id: input.brandId },
     select: { name: true, kernel: true, voice: true },
@@ -387,7 +391,58 @@ async function runImageGeneration(
   const memory = brandMemory(brand);
   const tier = payload.tier ?? "default";
   const imageModel = IMAGE_MODEL_BY_TIER[tier];
-  const prompt = buildImagePrompt(memory.kernel, memory.visualKit, payload.briefText);
+  // Poster wording is written from the approved caption rather than sliced out
+  // of it, so the lines are short enough to render cleanly and read at a
+  // glance. An explicit poster payload still wins, which keeps tests exact.
+  let posterCopy = payload.poster
+    ? {
+        headline: payload.poster.headline,
+        supportingLines: payload.poster.supportingLines ?? [],
+        callToAction: payload.poster.callToAction,
+        highlights: payload.poster.highlights ?? [],
+      }
+    : undefined;
+  if (!posterCopy && payload.posterSource) {
+    try {
+      const written = await generateText({
+        model: model(MODELS.copywriter),
+        prompt: buildPosterCopyPrompt(memory.kernel.name, payload.posterSource),
+        output: Output.object({ schema: PosterCopySchema }),
+        maxOutputTokens: 600,
+        maxRetries: 1,
+        providerOptions: { google: { thinkingConfig: { thinkingLevel: "low" } } },
+      });
+      const copy = PosterCopySchema.parse(written.output);
+      posterCopy = {
+        headline: copy.headline,
+        supportingLines: [copy.subheadline],
+        callToAction: copy.callToAction,
+        highlights: copy.highlights,
+      };
+    } catch (error) {
+      // Without poster copy the piece would be a wordless illustration, which
+      // is not what was asked for, so the caller is told plainly.
+      return agentFailure({
+        agentId: "copywriter",
+        traceId: input.traceId,
+        model: MODELS.copywriter,
+        summary: "Poster wording could not be written",
+        error: {
+          code: "MODEL_ERROR",
+          message: "The poster wording could not be written. Please retry.",
+          detail: error instanceof Error ? error.message : String(error),
+          retryable: true,
+        },
+      });
+    }
+  }
+
+  const prompt = buildImagePrompt(
+    memory.kernel,
+    memory.visualKit,
+    payload.briefText,
+    posterCopy,
+  );
   const modelPrompt = payload.referenceImageUrls?.length
     ? [{
         role: "user" as const,
@@ -423,21 +478,14 @@ async function runImageGeneration(
     });
   }
 
-  const blob = await put(
-    `assets/${input.brandId}/${input.traceId}.${imageExtension(imageFile.mediaType)}`,
-    Buffer.from(imageFile.uint8Array),
-    { access: "public", contentType: imageFile.mediaType },
-  );
-  await getDb().asset.create({
-    data: {
-      brandId: input.brandId,
-      channel: "instagram",
-      angle: "image",
-      body: payload.briefText,
-      mediaUrl: blob.url,
-      mediaType: imageFile.mediaType,
-      usedKernel: true,
-    },
+  // Storage picks a blob host when one is configured and the database
+  // otherwise, so generating an image needs no credential beyond the model key.
+  const stored = await storeGeneratedImage({
+    brandId: input.brandId,
+    traceId: input.traceId,
+    bytes: imageFile.uint8Array,
+    mediaType: imageFile.mediaType,
+    brief: payload.briefText,
   });
 
   return agentSuccess({
@@ -446,11 +494,11 @@ async function runImageGeneration(
     model: MODELS.copywriter,
     result: {
       kind: "image",
-      imageUrl: blob.url,
+      imageUrl: stored.url,
       mimeType: imageFile.mediaType,
       tier,
     },
-    summary: `1 image - ${tier}`,
+    summary: `1 image - ${tier} - ${stored.backend}`,
     inputTokens: generated.usage.inputTokens ?? 0,
     outputTokens: generated.usage.outputTokens ?? 0,
   });

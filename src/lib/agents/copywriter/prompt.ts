@@ -60,6 +60,10 @@ type VoiceProfile = {
 
 type VisualKit = {
   palette: string[];
+  paletteRoles: Array<{ hex: string; role: string }>;
+  motifs: string[];
+  typography: string[];
+  logoDescription: string;
   styleFragment: string;
   logoSafeArea: string;
 };
@@ -223,16 +227,80 @@ ${refinement.priorText}
   return base;
 }
 
+/**
+ * Asks for poster wording rather than reusing caption sentences. A caption is
+ * written to be read; a poster is written to be glanced at.
+ */
+export function buildPosterCopyPrompt(
+  brandName: string,
+  sourceText: string,
+): string {
+  return `Turn this approved ${brandName} social post into wording for a poster.
+
+APPROVED POST
+<post>
+${sourceText}
+</post>
+
+A poster is read in about two seconds from a phone feed, so compress hard.
+
+headline      - the hook, at most 6 words. Punchy, concrete, no full stop.
+subheadline   - what the brand does for them, at most 9 words.
+highlights    - 2 or 3 phrases of at most 4 words each. Each names one concrete
+                thing a child does or gets, so it can sit beside an icon.
+                Examples of the right shape: "Pours their own drink",
+                "Packs their own bag".
+callToAction  - the action, at most 5 words, starting with a verb.
+
+RULES
+- Say only what the approved post says. Do not add a claim, price, date,
+  discount, guarantee or statistic that is not already there.
+- Plain words a parent understands instantly. No marketing jargon.
+- Never end a line with an ellipsis or a trailing fragment.
+- Write complete phrases; every line must make sense on its own.`;
+}
+
+export interface PosterCopy {
+  headline: string;
+  supportingLines: string[];
+  callToAction: string;
+  highlights: string[];
+}
+
+const NL = "\n";
+
+function paletteBlock(visualKit: VisualKit): string {
+  if (visualKit.paletteRoles.length === 0) {
+    return `Palette: ${visualKit.palette.join(", ")}`;
+  }
+  return visualKit.paletteRoles
+    .map((entry) => `- ${entry.hex} (${entry.role})`)
+    .join(NL);
+}
+
 export function buildImagePrompt(
   kernel: BrandKernel,
   visualKit: VisualKit,
   briefText: string,
+  poster?: PosterCopy,
 ): string {
-  return `Generate a single on-brand marketing image for ${kernel.name}.
+  const identity = [
+    "BRAND COLOURS - use these exact hex values and no others as the dominant colours:",
+    paletteBlock(visualKit),
+    visualKit.motifs.length
+      ? `${NL}BRAND MOTIFS - reuse these recurring elements:${NL}${visualKit.motifs.map((motif) => `- ${motif}`).join(NL)}`
+      : "",
+    visualKit.typography.length
+      ? `${NL}LETTERING STYLE:${NL}${visualKit.typography.map((item) => `- ${item}`).join(NL)}`
+      : "",
+    visualKit.styleFragment ? `${NL}Style reference: ${visualKit.styleFragment}` : "",
+  ].filter(Boolean).join(NL);
 
-VISUAL KIT
-Palette: ${visualKit.palette.join(', ')}
-Style reference: ${visualKit.styleFragment}
+  if (!poster) {
+    return `Generate a single on-brand marketing image for ${kernel.name}.
+
+${identity}
+
 Logo safe-area rules: ${visualKit.logoSafeArea}
 
 BRIEF
@@ -245,6 +313,67 @@ supplied alongside this prompt, treat them as the ground truth for brand
 look-and-feel and prioritise visual consistency with them over the text
 description. Do not include any text/lettering in the image unless the brief
 explicitly asks for it.`;
+  }
+
+  // Poster mode renders approved copy inside the artwork, so the wording is
+  // quoted exactly. Anything the model paraphrases becomes a claim the brand
+  // never approved.
+  const logoBlock = visualKit.logoDescription
+    ? `BRAND MARK - reconstruct it from this description and place it clearly, with clear space around it:
+${visualKit.logoDescription}
+Render the brand wording exactly as written above, spelled correctly. If a reference image of the real logo is supplied, copy that instead and ignore this description.`
+    : "No confirmed logo exists. Do not invent a logo, monogram or brand mark.";
+
+  return `Design a single social media poster - an informational graphic, not a photograph - for ${kernel.name}.
+
+EVERY SECTION BELOW EXCEPT "TEXT TO SET IN THE POSTER" IS A DESIGN
+INSTRUCTION, NOT CONTENT. Apply it silently and never draw it. Do not render
+a hex code, colour swatch, palette chart, style guide or specimen sheet, and
+do not caption, label or annotate any part of the artwork - including notes
+about spacing, margins, clear space, layout, colour, motif or typeface. The
+only words allowed anywhere in the image are the lines under "TEXT TO SET IN
+THE POSTER" plus the brand wording inside the mark itself.
+
+${identity}
+
+${logoBlock}
+
+TEXT TO SET IN THE POSTER - reproduce this wording exactly, spelled correctly, and add no other words:
+Headline: ${poster.headline}
+${poster.supportingLines.map((line) => `Subheadline: ${line}`).join(NL)}
+${poster.highlights.map((line) => `Highlight (pair with its own icon): ${line}`).join(NL)}
+Call to action: ${poster.callToAction}
+
+LAYOUT - this is an infographic, so pictures carry the meaning and words label it
+- Text must occupy well under a third of the poster. The rest is illustration, icons and colour.
+- Give each highlight its own icon or small illustrated panel, arranged in a clear row or column so the three read as a set.
+- One single finished poster. Do not divide it into before/after panels, variants or a grid of alternatives, and do not repeat the same illustration twice.
+- Visual hierarchy: headline largest, subheadline smaller beneath it, highlights as an icon set, call to action in a contrasting button or banner at the bottom.
+- Show the brand mark exactly once, in one corner, at a modest size. The mascot must not appear anywhere else.
+- Leave generous margins. Text must never touch an edge or overlap a face.
+- Flat vector illustration throughout. Bold, friendly shapes with plenty of open space.
+- Every colour must come from the brand palette above.
+
+TEXT ACCURACY - the most important requirement
+- Each line above appears EXACTLY ONCE. Never set the same sentence twice, in
+  two type styles, or in two places.
+- Copy each line character by character. Do not double a letter or a word, and
+  do not add any word that is not written above.
+- Never draw an ellipsis, "...", or a cut-off word. Every line is complete as
+  given; if a line seems long, set it smaller rather than trimming it.
+- Set every line in one consistent typeface. Do not mix a script and a sans
+  version of the same sentence.
+- Before finishing, read every word in the image back against the text above
+  and correct anything that does not match exactly.
+
+WHAT THIS POSTER IS ABOUT
+<brief>
+${briefText}
+</brief>
+
+Do not invent prices, dates, discounts, phone numbers, results or awards that
+are not in the text above. Do not add placeholder words. Spell every word
+correctly.`;
 }
 
 // Re-export for callers that only need the type, keeps prompt.ts self-contained

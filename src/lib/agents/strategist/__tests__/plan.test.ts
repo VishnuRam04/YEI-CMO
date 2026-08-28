@@ -49,7 +49,10 @@ describe("Strategist execution planning", () => {
     const plan = buildExecutionPlan({
       objective: "Run a Merdeka campaign to recruit new students",
       strategy,
-      intelligence,
+      evidence: {
+        hasOwnedPerformance: intelligence.performanceSignals.length > 0,
+        hasMarketEvidence: intelligence.marketSignals.length > 0,
+      },
       createdAt: "2026-08-27T09:00:00.000Z",
     });
 
@@ -65,7 +68,9 @@ describe("Strategist execution planning", () => {
     expect(plan.schedule.every((item) => item.channel === "Facebook")).toBe(true);
     expect(plan.schedule.every((item) => item.expectedImpact.length > 20)).toBe(true);
     expect(plan.planningBasis).toBe("market-evidence-directional");
-    expect(plan.measurement.timingBasis).toContain("test windows");
+    expect(plan.measurement.timingBasis).toContain("starting point");
+    expect(plan.cadence).toContain("planned posts");
+    expect(plan.schedule[0].action).toContain("one clear instruction");
   });
 
   it("returns three conservative options when model generation is unavailable", () => {
@@ -81,6 +86,12 @@ describe("Strategist execution planning", () => {
     expect(strategy.experiments).toHaveLength(3);
     expect(strategy.recommendedExperimentId).toBe("exp-conversion");
     expect(strategy.assumptions.join(" ")).toContain("model-generated comparison");
-    expect(strategy.offerStrategy).toContain("confirmed catalogue offer");
+    expect(strategy.offerStrategy).toContain("business has confirmed");
+    const userFacingText = [
+      strategy.verdictReason,
+      ...strategy.experiments.flatMap((experiment) => [experiment.title, experiment.approach]),
+    ].join(" ");
+    expect(userFacingText).not.toMatch(/conversion path|proof-led|experience activation|qualified awareness|evidence-led/i);
+    expect(userFacingText).toMatch(/messag|call|book/i);
   });
 });

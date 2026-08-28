@@ -65,15 +65,15 @@ export function buildFallbackStrategy(options: {
   const evidenceIds = options.intelligence.marketSignals.slice(0, 4).map((signal) => signal.id);
   const marketAdvantage = options.intelligence.marketSignals[0]?.implication
     ?? options.intelligence.opportunities[0]
-    ?? "Use confirmed brand proof to create a position competitors cannot credibly copy";
+    ?? "Show real examples of what makes this business different";
   const performance = options.intelligence.performanceSignals[0];
-  const primaryMetric = performance?.metric ?? "Qualified enquiries";
+  const primaryMetric = performance?.metric ?? "New enquiries";
   const successThreshold = performance
-    ? `Beat the imported ${performance.metric} baseline of ${performance.value}${performance.unit}.`
-    : "Establish a documented baseline and generate qualified responses before increasing spend.";
+    ? `Get a better result than the current ${performance.metric} of ${performance.value}${performance.unit}.`
+    : "Track every message, call or booking. Spend more only after the campaign brings real enquiries.";
   const stopCondition = performance
-    ? `Pause the route if ${performance.metric} remains below the imported baseline at the review point.`
-    : "Pause after two consecutive scheduled assets generate no qualified response; revise the message before continuing.";
+    ? `Pause if ${performance.metric} is still below the current result on the review date.`
+    : "If two posts in a row bring no enquiries, pause and change the message before posting again.";
   const productNames = options.productNames.slice(0, 20);
   const common = {
     channel,
@@ -86,57 +86,57 @@ export function buildFallbackStrategy(options: {
 
   return {
     ideaVerdict: "promising",
-    verdictReason: "The objective is commercially useful, but it should be tested through a measured conversion path rather than treated as a one-off promotion.",
-    strategicThesis: `Use ${positioning} as the campaign's distinctive reason to believe. Market advantage: ${marketAdvantage}`.slice(0, 1_500),
+    verdictReason: "This is a good idea. Start with a short campaign, see which posts bring real enquiries, then spend more on what works.",
+    strategicThesis: `Build the campaign around ${positioning}. The current research suggests: ${marketAdvantage}`.slice(0, 1_500),
     targetAudiences: audienceNames(kernel),
     selectedProducts: productNames,
     positioningAngle: positioning,
-    offerStrategy: "Use only a confirmed catalogue offer. If no offer is confirmed, direct prospects to an enquiry, booking or consultation rather than inventing a discount.",
+    offerStrategy: "Use only an offer or price that the business has confirmed. If there is no confirmed offer, ask people to message, call or book instead of making up a discount.",
     channelRoles: [{
       channel,
-      purpose: "Create demand, establish proof and convert qualified interest through one measurable call to action.",
-      cadence: "Four launch assets in the first week, then review before scaling.",
+      purpose: "Help the right people understand the offer and take one clear next step.",
+      cadence: "Publish four posts in the first week, then check the results before spending more.",
     }],
     contentPillars: [
-      { name: "Distinctive proof", rationale: "Show why the brand is credibly different, not merely louder.", evidenceIds },
-      { name: "Audience outcome", rationale: "Translate the offer into a concrete result the audience values.", evidenceIds },
-      { name: "Decision friction", rationale: "Answer the objection most likely to prevent the next action.", evidenceIds: [] },
+      { name: "Show what makes you different", rationale: "Use real photos, examples or customer experiences instead of broad claims.", evidenceIds },
+      { name: "Show what the customer gets", rationale: "Explain the useful result in words customers already understand.", evidenceIds },
+      { name: "Answer common worries", rationale: "Answer the question most likely to stop someone from contacting the business.", evidenceIds: [] },
     ],
     experiments: [
       {
         id: "exp-proof-led",
-        title: `${label} proof-led organic series`.slice(0, 100),
-        approach: `Publish a compact ${channel} series built around visible proof and this evidence-led advantage: ${marketAdvantage}`.slice(0, 360),
+        title: `${label} simple post series`.slice(0, 100),
+        approach: `Post real photos, videos or customer examples on ${channel}. End every post by telling people exactly how to message, call or book.`.slice(0, 360),
         costLevel: "low",
         riskLevel: "low",
-        tradeoff: "Lowest production and media cost, but reach depends on the existing audience and organic distribution.",
-        hypothesis: "Specific proof and a single response action will produce more qualified intent than a broad awareness message.",
+        tradeoff: "This costs the least, but fewer people may see it because there is no paid advertising.",
+        hypothesis: "Real examples and one clear next step should bring more enquiries than a general promotional post.",
         durationDays: 7,
-        assetType: "Organic proof series",
+        assetType: "Simple social posts",
         ...common,
       },
       {
         id: "exp-conversion",
-        title: `${label} conversion campaign`.slice(0, 100),
-        approach: `Run a coordinated ${channel} sequence around this market advantage: ${marketAdvantage}`.slice(0, 360),
+        title: `${label} enquiry campaign`.slice(0, 100),
+        approach: `Run a short ${channel} campaign: explain the offer, show a real example, answer a common question, and remind people how to contact you.`.slice(0, 360),
         costLevel: "medium",
         riskLevel: "low",
-        tradeoff: "Requires disciplined creative production and response handling, but gives the clearest conversion signal.",
-        hypothesis: "A sequenced proof-to-action journey will outperform isolated promotional posts on qualified responses.",
+        tradeoff: "This takes more preparation, but it is the easiest option for tracking which posts bring enquiries.",
+        hypothesis: "A connected set of useful posts should bring more enquiries than unrelated one-off posts.",
         durationDays: 14,
-        assetType: "Mixed campaign sequence",
+        assetType: "Short social campaign",
         ...common,
       },
       {
         id: "exp-activation",
-        title: `${label} experience activation`.slice(0, 100),
-        approach: `Turn this advantage into a real-world or live digital experience, build attendance through ${channel}, and capture follow-up permission: ${marketAdvantage}`.slice(0, 360),
+        title: `${label} open day or live event`.slice(0, 100),
+        approach: `Invite people to visit or join a live event. Use ${channel} to collect bookings, then follow up with everyone who gave permission to be contacted.`.slice(0, 360),
         costLevel: "high",
         riskLevel: "medium",
-        tradeoff: "Produces stronger first-hand proof and urgency, but needs more operations, budget and lead follow-up capacity.",
-        hypothesis: "Participation-based proof will create higher-intent conversations than passive campaign exposure.",
+        tradeoff: "People can experience the business directly, but this costs more and needs staff to run the event and follow up.",
+        hypothesis: "People who experience the business directly should be more likely to ask questions or book.",
         durationDays: 21,
-        assetType: "Activation and follow-up series",
+        assetType: "Event and follow-up posts",
         ...common,
       },
     ],
@@ -148,14 +148,14 @@ export function buildFallbackStrategy(options: {
         : []),
     ],
     risks: [
-      "Do not publish an unconfirmed product, price, promotion or availability claim.",
+      "Do not publish a product, price, promotion or availability unless the business has confirmed it.",
       ...(evidenceIds.length === 0
         ? ["No current public market evidence was available; differentiation is brand-led until research completes."]
         : []),
     ],
     reviewTriggers: [
-      "Review results at the scheduled end date before scaling spend or production.",
-      "Revise the message if two consecutive assets produce no qualified response.",
+      "Check the results on the planned review date before spending more.",
+      "Change the message if two posts in a row bring no enquiries.",
     ],
     informationRequests: [],
   };

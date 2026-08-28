@@ -81,11 +81,44 @@ export interface TextGenerationPayload {
   priorText?: string;
 }
 
+export interface PosterCopyPayload {
+  headline: string;
+  supportingLines?: string[];
+  callToAction: string;
+  /** Two or three icon-able phrases that carry the infographic. */
+  highlights?: string[];
+}
+
+/**
+ * Poster wording is written, not sliced. A caption sentence makes a poor
+ * headline, and character-truncating one mid-word puts an ellipsis into the
+ * artwork. Word limits are enforced here so a long line fails validation and
+ * is regenerated rather than being cut.
+ */
+export const PosterCopySchema = z.object({
+  headline: z.string().trim().min(1).max(38)
+    .refine((value) => value.split(/\s+/).length <= 6, "Use at most six words."),
+  subheadline: z.string().trim().min(1).max(52)
+    .refine((value) => value.split(/\s+/).length <= 9, "Use at most nine words."),
+  highlights: z.array(
+    z.string().trim().min(1).max(26)
+      .refine((value) => value.split(/\s+/).length <= 4, "Use at most four words."),
+  ).min(2).max(3),
+  callToAction: z.string().trim().min(1).max(30)
+    .refine((value) => value.split(/\s+/).length <= 5, "Use at most five words."),
+});
+
+export type PosterCopyModelOutput = z.infer<typeof PosterCopySchema>;
+
 export interface ImageGenerationPayload {
   mode: "image";
   briefText: string;
   tier?: ImageTier;
   referenceImageUrls?: string[];
+  /** Present when the image must be a poster carrying this approved wording. */
+  poster?: PosterCopyPayload;
+  /** Approved caption the poster copy should be written from. */
+  posterSource?: string;
 }
 
 export type CopywriterPayload = TextGenerationPayload | ImageGenerationPayload;
@@ -113,6 +146,16 @@ const imagePayloadSchema = z.object({
     .array(z.url().refine((url) => ["http:", "https:"].includes(new URL(url).protocol)))
     .max(10)
     .default([]),
+  poster: z
+    .object({
+      headline: z.string().trim().min(1).max(160),
+      supportingLines: z.array(z.string().trim().min(1).max(200)).max(4).default([]),
+      callToAction: z.string().trim().min(1).max(120),
+      highlights: z.array(z.string().trim().min(1).max(60)).max(3).default([]),
+    })
+    .optional(),
+  /** Approved caption the poster copy should be written from. */
+  posterSource: z.string().trim().min(1).max(4_000).optional(),
 });
 
 export const CopywriterPayloadSchema: z.ZodType<CopywriterPayload> =
