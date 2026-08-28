@@ -169,9 +169,25 @@ export interface TextVariant extends z.infer<typeof VariantSchema> {
   usedKernel: boolean;
 }
 
+export interface BrandAuditCriterion {
+  criterion: string;
+  score: number;
+  passed: boolean;
+  reasons: string[];
+}
+
+export interface BrandAuditReport {
+  angle: string;
+  passed: boolean;
+  overallScore: number;
+  criteria: BrandAuditCriterion[];
+  notes: string[];
+}
+
 export interface TextGenerationResult {
   kind: "text";
   variants: TextVariant[];
+  brandAudit?: BrandAuditReport[];
 }
 
 export interface ImageGenerationResult {

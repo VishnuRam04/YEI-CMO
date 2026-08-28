@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Check, Copy, ImageIcon, LoaderCircle, RefreshCw, Sparkles } from "lucide-react";
-import type { Channel, TextVariant } from "@/lib/agents/copywriter/schema";
+import type { BrandAuditReport, Channel, TextVariant } from "@/lib/agents/copywriter/schema";
 
 type ImageState = {
   url: string;
@@ -60,6 +60,7 @@ export function PlanItemWriter({
   const [variants, setVariants] = useState<TextVariant[]>([]);
   const [selected, setSelected] = useState(0);
   const [copied, setCopied] = useState(-1);
+  const [brandAudit, setBrandAudit] = useState<BrandAuditReport[]>([]);
   const [textStatus, setTextStatus] = useState<"idle" | "working">("idle");
   const [textError, setTextError] = useState("");
   const [image, setImage] = useState<ImageState>(null);
@@ -70,11 +71,12 @@ export function PlanItemWriter({
     setTextStatus("working");
     setTextError("");
     try {
-      const result = await runAgentRoute<{ kind: "text"; variants: TextVariant[] }>({
+      const result = await runAgentRoute<{ kind: "text"; variants: TextVariant[]; brandAudit?: BrandAuditReport[] }>({
         brandId,
         payload: { mode: "text", channel, brief },
       });
       setVariants(result.variants);
+      setBrandAudit(result.brandAudit ?? []);
       setSelected(0);
     } catch (error) {
       setTextError(error instanceof Error ? error.message : String(error));
@@ -125,6 +127,8 @@ export function PlanItemWriter({
       variant.hashtags?.length ? variant.hashtags.join(" ") : "",
     ].filter(Boolean).join("\n\n");
   }
+
+  const selectedAudit = brandAudit.find((audit) => audit.angle === variants[selected]?.angle) ?? null;
 
   return (
     <section className="writer">
@@ -195,6 +199,26 @@ export function PlanItemWriter({
               {variant.hashtags && variant.hashtags.length > 0 && (
                 <div className="writer-hashtags">{variant.hashtags.join(" ")}</div>
               )}
+              {(() => {
+                const audit = brandAudit.find((item) => item.angle === variant.angle);
+                if (!audit) return null;
+                return (
+                  <div className="writer-score-card" style={{ marginTop: 14 }}>
+                    <div className="writer-score-header">
+                      <strong>Brand fit</strong>
+                      <span>{audit.overallScore}/100</span>
+                    </div>
+                    <div className="writer-score-grid">
+                      {audit.criteria.map((criterion) => (
+                        <div key={criterion.criterion} className="writer-score-row">
+                          <span>{criterion.criterion}</span>
+                          <b>{criterion.score}</b>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
               <div className="variant-actions">
                 <button
                   type="button"
@@ -215,6 +239,27 @@ export function PlanItemWriter({
               </div>
             </article>
           ))}
+        </div>
+      )}
+
+      {selectedAudit && (
+        <div className="writer-brand-report" style={{ marginTop: 18 }}>
+          <div className="kernel-field-label">Brand judge</div>
+          <div className="writer-score-header">
+            <strong>{selectedAudit.angle}</strong>
+            <span>{selectedAudit.overallScore}/100</span>
+          </div>
+          <div className="writer-score-grid">
+            {selectedAudit.criteria.map((criterion) => (
+              <div key={criterion.criterion} className="writer-score-row">
+                <span>{criterion.criterion}</span>
+                <b>{criterion.score}</b>
+              </div>
+            ))}
+          </div>
+          <ul className="writer-score-notes">
+            {selectedAudit.notes.map((note) => <li key={note}>{note}</li>)}
+          </ul>
         </div>
       )}
 

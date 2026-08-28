@@ -43,7 +43,12 @@ export default async function InsightsPage() {
       })
     : [];
 
-  const totals = metrics.reduce((sum, metric) => ({
+  const totals: {
+    impressions: number;
+    clicks: number;
+    spend: number;
+    conversions: number;
+  } = metrics.reduce((sum, metric) => ({
     impressions: sum.impressions + metric.impressions,
     clicks: sum.clicks + metric.clicks,
     spend: sum.spend + metric.spend,
@@ -117,7 +122,7 @@ export default async function InsightsPage() {
     <section style={{ marginTop: 16 }}>
       <div className="card-head"><div><div className="card-note">Reusable intelligence</div><h2 className="section-title" style={{ marginTop: 5 }}>Learned patterns</h2></div><span className="tag tag-lime">{patterns.length} stored</span></div>
       {patterns.length > 0
-        ? <div className="grid-3">{patterns.slice(0, 6).map((pattern) => <article className="pattern-card" key={pattern.id}>
+        ? <div className="grid-3">{patterns.slice(0, 6).map((pattern: typeof patterns[number]) => <article className="pattern-card" key={pattern.id}>
             <div className="pattern-lift">{displayNumber(pattern.lift)}×</div>
             <div className="pattern-copy"><strong style={{ display: "block", fontSize: 12, marginBottom: 4, color: "#17201d" }}>{pattern.condition}</strong>{pattern.outcome} · n={pattern.n}</div>
             <span className="tag">{pattern.dimension} <ArrowUpRight size={10} /></span>

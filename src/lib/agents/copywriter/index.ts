@@ -22,6 +22,11 @@ import {
   type TextGenerationPayload,
   type TextVariant,
 } from "./schema";
+import {
+  evaluateBrandFitForContent,
+  type BrandJudgeReport,
+} from "./brand-judge";
+import type { BrandAuditReport } from "./schema";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -255,92 +260,148 @@ async function runTextGeneration(
 
   const memory = brandMemory(brand);
   const usedKernel = payload.usedKernel ?? true;
-  const generation = streamText({
-    model: model(MODELS.copywriter),
-    instructions: buildSystemPrompt(memory.kernel, memory.voice, usedKernel),
-    prompt: buildUserPrompt(payload),
-    output: Output.object({ schema: VariantsSchema }),
-    temperature: 0.7,
-    maxOutputTokens: 3_000,
-    maxRetries: 1,
-    timeout: { totalMs: 18_000, firstChunkMs: 12_000, chunkMs: 8_000 },
-    providerOptions: {
-      google: { thinkingConfig: { thinkingLevel: "low" } },
-    },
-  });
+  const brandJudgeAttempts = 3;
+  let finalVariants: TextVariant[] | null = null;
+  let finalUsage = { inputTokens: 0, outputTokens: 0 };
+  let finalAudit: BrandAuditReport[] = [];
+  let promptForNextAttempt = buildUserPrompt(payload);
 
-  let object;
-  let usage;
-  try {
-    [object, usage] = await Promise.all([generation.output, generation.usage]);
-  } catch (error) {
-    return agentFailure({
-      agentId: "copywriter",
-      traceId: input.traceId,
-      model: MODELS.copywriter,
-      summary: "Copy validation failed",
-      error: {
-        code: NoObjectGeneratedError.isInstance(error)
-          ? "VALIDATION_ERROR"
-          : "MODEL_ERROR",
-        message: NoObjectGeneratedError.isInstance(error)
-          ? "Gemini returned copy in an unexpected format. Please retry."
-          : "Gemini could not generate copy. Please retry.",
-        detail: error instanceof Error ? error.message : String(error),
-        retryable: true,
+  for (let attempt = 0; attempt < brandJudgeAttempts; attempt += 1) {
+    const generation = streamText({
+      model: model(MODELS.copywriter),
+      instructions: buildSystemPrompt(memory.kernel, memory.voice, usedKernel),
+      prompt: promptForNextAttempt,
+      output: Output.object({ schema: VariantsSchema }),
+      temperature: 0.7,
+      maxOutputTokens: 3_000,
+      maxRetries: 1,
+      timeout: { totalMs: 18_000, firstChunkMs: 12_000, chunkMs: 8_000 },
+      providerOptions: {
+        google: { thinkingConfig: { thinkingLevel: "low" } },
       },
     });
+
+    let object;
+    let usage;
+    try {
+      [object, usage] = await Promise.all([generation.output, generation.usage]);
+    } catch (error) {
+      return agentFailure({
+        agentId: "copywriter",
+        traceId: input.traceId,
+        model: MODELS.copywriter,
+        summary: "Copy validation failed",
+        error: {
+          code: NoObjectGeneratedError.isInstance(error)
+            ? "VALIDATION_ERROR"
+            : "MODEL_ERROR",
+          message: NoObjectGeneratedError.isInstance(error)
+            ? "Gemini returned copy in an unexpected format. Please retry."
+            : "Gemini could not generate copy. Please retry.",
+          detail: error instanceof Error ? error.message : String(error),
+          retryable: true,
+        },
+      });
+    }
+
+    const parsed = VariantsSchema.safeParse(object);
+    if (!parsed.success) {
+      return agentFailure({
+        agentId: "copywriter",
+        traceId: input.traceId,
+        model: MODELS.copywriter,
+        summary: "Copy validation failed",
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "Gemini returned copy in an unexpected format. Please retry.",
+          detail: parsed.error.message,
+          retryable: true,
+        },
+      });
+    }
+
+    const variants: TextVariant[] = parsed.data.variants.map((variant) => ({
+      ...variant,
+      body: variant.body.replace(/\s+(?:#[\p{L}\p{N}_-]+\s*)+$/u, "").trim(),
+      channel: payload.channel,
+      hashtags:
+        payload.channel === "email"
+          ? undefined
+          : variant.hashtags?.map((hashtag) =>
+              hashtag.startsWith("#") ? hashtag : `#${hashtag}`,
+            ),
+      usedKernel,
+    }));
+
+    const channelError = validateForChannel(
+      payload,
+      variants,
+      memory.voice.bannedWords,
+    );
+    if (channelError) {
+      return agentFailure({
+        agentId: "copywriter",
+        traceId: input.traceId,
+        model: MODELS.copywriter,
+        summary: "Channel validation failed",
+        error: {
+          code: "VALIDATION_ERROR",
+          message: channelError,
+          retryable: true,
+        },
+      });
+    }
+
+    const reviews = variants.map((variant) => ({
+      variant,
+      report: evaluateBrandFitForContent(memory, persistedText(variant), payload.channel),
+    }));
+    const failedReview = reviews.filter(({ report }) => !report.passed);
+
+    if (failedReview.length === 0) {
+      finalVariants = variants;
+      finalUsage = { inputTokens: usage.inputTokens ?? 0, outputTokens: usage.outputTokens ?? 0 };
+      finalAudit = reviews.map(({ variant, report }) => ({
+        angle: variant.angle,
+        passed: report.passed,
+        overallScore: report.overallScore,
+        criteria: report.criteria.map((criterion) => ({
+          criterion: criterion.criterion,
+          score: criterion.score,
+          passed: criterion.passed,
+          reasons: criterion.reasons,
+        })),
+        notes: report.notes,
+      }));
+      break;
+    }
+
+    const correctionSummary = failedReview
+      .map(({ variant, report }) => {
+        const criteria = report.criteria.filter((criterion) => criterion.score < 75);
+        return `${variant.angle}: ${criteria.map((criterion) => `${criterion.criterion}=${criterion.score}`).join(", ")}`;
+      })
+      .join("; ");
+
+    promptForNextAttempt = `${buildUserPrompt(payload)}\n\nBRAND REVIEW FEEDBACK\nRewrite the draft so that every criterion is at least 75 and the average score is at least 80. Fix these failures before returning:\n${correctionSummary}\n\nDo not repeat the rejected phrasing. Preserve the task brief but improve the copy to match the brand voice, palette, typography, claims safety, and channel constraints.`;
   }
 
-  const parsed = VariantsSchema.safeParse(object);
-  if (!parsed.success) {
+  if (!finalVariants) {
     return agentFailure({
       agentId: "copywriter",
       traceId: input.traceId,
       model: MODELS.copywriter,
-      summary: "Copy validation failed",
+      summary: "Brand audit failed",
       error: {
         code: "VALIDATION_ERROR",
-        message: "Gemini returned copy in an unexpected format. Please retry.",
-        detail: parsed.error.message,
-        retryable: true,
-      },
-    });
-  }
-
-  const variants: TextVariant[] = parsed.data.variants.map((variant) => ({
-    ...variant,
-    body: variant.body.replace(/\s+(?:#[\p{L}\p{N}_-]+\s*)+$/u, "").trim(),
-    channel: payload.channel,
-    hashtags:
-      payload.channel === "email"
-        ? undefined
-        : variant.hashtags?.map((hashtag) =>
-            hashtag.startsWith("#") ? hashtag : `#${hashtag}`,
-          ),
-    usedKernel,
-  }));
-  const channelError = validateForChannel(
-    payload,
-    variants,
-    memory.voice.bannedWords,
-  );
-  if (channelError) {
-    return agentFailure({
-      agentId: "copywriter",
-      traceId: input.traceId,
-      model: MODELS.copywriter,
-      summary: "Channel validation failed",
-      error: {
-        code: "VALIDATION_ERROR",
-        message: channelError,
+        message: "The generated copy failed the brand-fit gate after repeated revisions.",
         retryable: true,
       },
     });
   }
 
   await getDb().asset.createMany({
-    data: variants.map((variant) => ({
+    data: finalVariants.map((variant) => ({
       brandId: input.brandId,
       channel: variant.channel,
       angle: variant.angle,
@@ -353,10 +414,14 @@ async function runTextGeneration(
     agentId: "copywriter",
     traceId: input.traceId,
     model: MODELS.copywriter,
-    result: { kind: "text", variants },
-    summary: `3 variants - ${variants.map((variant) => variant.angle).join("/")}`,
-    inputTokens: usage.inputTokens ?? 0,
-    outputTokens: usage.outputTokens ?? 0,
+    result: {
+      kind: "text",
+      variants: finalVariants,
+      brandAudit: finalAudit,
+    },
+    summary: `3 variants - ${finalVariants.map((variant) => variant.angle).join("/")}`,
+    inputTokens: finalUsage.inputTokens,
+    outputTokens: finalUsage.outputTokens,
   });
 }
 
