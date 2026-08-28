@@ -1,0 +1,60 @@
+{
+  "input": {
+    "mode": "preflight",
+    "campaign": {
+      "name": "Founder proof sprint",
+      "objective": "Generate qualified demo requests from operations leaders.",
+      "hypothesis": "Proof-led founder stories will increase qualified demo requests over fourteen days.",
+      "offer": {
+        "name": "Workflow review",
+        "valueProposition": "A practical review of the campaign workflow.",
+        "callToAction": "Book a review",
+        "proofPoints": ["Used in three approved pilot workspaces"]
+      },
+      "audiences": [{
+        "name": "Operations leaders",
+        "need": "Reduce disconnected campaign work.",
+        "targeting": "Malaysia, operations leadership titles, B2B software interest."
+      }],
+      "channels": ["linkedin"],
+      "budget": {
+        "amount": 1000,
+        "currency": "MYR",
+        "allocations": [{ "channel": "linkedin", "amount": 1000 }]
+      },
+      "startDate": "2026-09-01",
+      "endDate": "2026-09-14",
+      "primaryKpi": "Cost per lead",
+      "targetValue": 80,
+      "targetUnit": "MYR",
+      "landingPage": {
+        "url": "https://example.com/review",
+        "headline": "Make campaign work easier to operate",
+        "offer": "A practical workflow review",
+        "callToAction": "Book a review"
+      },
+      "tracking": {
+        "analyticsConfigured": true,
+        "pixelConfigured": true,
+        "conversionEvent": "demo_request_submitted",
+        "utmPlan": "source / medium / campaign / content"
+      }
+    },
+    "assets": [{
+      "id": "asset-1",
+      "channel": "linkedin",
+      "format": "post",
+      "audience": "Operations leaders",
+      "message": "Disconnected campaign work creates avoidable rework. Book a review.",
+      "callToAction": "Book a review",
+      "brandScore": 91,
+      "approved": true
+    }]
+  },
+  "expected": {
+    "mode": "preflight",
+    "verdict": "ready",
+    "criteriaCount": 7,
+    "recommendationCount": 3
+  }
+}

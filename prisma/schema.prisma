@@ -21,6 +21,7 @@ model Brand {
   patterns  Pattern[]
   directives StrategicDirective[]
   cmoConversations CmoConversation[]
+  campaigns Campaign[]
 }
 
 model CmoConversation {
@@ -104,6 +105,23 @@ model Metric {
   spend       Float
   conversions Int
   @@index([brandId, date])
+}
+
+model Campaign {
+  id               String   @id @default(cuid())
+  brandId          String
+  conversationId   String?
+  strategyId       String   @unique
+  objective        String
+  selectedOptionId String
+  status           String   @default("proposed")
+  strategy         Json
+  executionPlan    Json
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  brand            Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+
+  @@index([brandId, createdAt])
 }
 
 model Pattern {

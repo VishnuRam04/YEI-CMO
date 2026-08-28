@@ -3,7 +3,8 @@ export type CmoTraceAgentId =
   | "brand-analyst"
   | "analyst"
   | "strategist"
-  | "copywriter";
+  | "copywriter"
+  | "campaign-critic";
 
 export type CmoTraceStatus = "queued" | "working" | "completed" | "failed";
 
