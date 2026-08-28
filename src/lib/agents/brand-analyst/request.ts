@@ -41,7 +41,9 @@ function stringField(formData: FormData, name: string): string | undefined {
 }
 
 function inferredMimeType(file: File): string {
-  if (file.type) return file.type.toLowerCase();
+  if (file.type && file.type.toLowerCase() !== "application/octet-stream") {
+    return file.type.toLowerCase();
+  }
   const extension = file.name.split(".").pop()?.toLowerCase();
   const types: Record<string, string> = {
     avif: "image/avif",
@@ -59,6 +61,7 @@ function inferredMimeType(file: File): string {
     rtf: "application/rtf",
     txt: "text/plain",
     webp: "image/webp",
+    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     xml: "text/xml",
   };
   return extension ? (types[extension] ?? "application/octet-stream") : "application/octet-stream";
@@ -116,7 +119,13 @@ async function parseMultipartRequest(
       const details = metadata[index];
       return {
         kind,
-        label: details?.label ?? (fieldName === "logo" ? "logo" : "uploaded-file"),
+        label:
+          details?.label ??
+          (fieldName === "logo"
+            ? "logo"
+            : fieldName === "catalogue"
+              ? "product-catalogue"
+              : "uploaded-file"),
         title: details?.title,
         authority: details?.authority,
         fileName: file.name,

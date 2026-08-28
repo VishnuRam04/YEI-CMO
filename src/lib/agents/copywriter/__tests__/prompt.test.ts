@@ -8,6 +8,38 @@ const kernel = {
   icps: [{ name: 'Operations leaders', needs: ['Reliable humid-climate operation'] }],
   differentiators: ['Humidity-hardened components'],
   proofPoints: ['Deployed in an approved Jakarta pilot'],
+  pricingPosture: {
+    position: 'premium',
+    summary: 'Competes on reliability rather than low price.',
+    signals: ['Premium service package'],
+    priceObjectionGuidance: 'Lead with lifecycle value.',
+  },
+  founderStory: {
+    founders: ['Maya Tan'],
+    foundingYear: '2021',
+    originSummary: 'Started after warehouse robots repeatedly failed in humid climates.',
+    foundingMotivation: 'Build reliable automation for Southeast Asia.',
+    milestones: ['First Jakarta pilot'],
+  },
+  regulatedClaims: {
+    status: 'potentially-regulated',
+    domains: ['workplace safety'],
+    needsClaimsReview: true,
+    rationale: 'Safety outcomes require support.',
+    substantiationRequirements: ['Use approved pilot evidence only'],
+  },
+  productCatalogues: [{
+    fileName: 'robots.xlsx',
+    products: [{
+      name: 'DockBot X1',
+      sku: 'DB-X1',
+      category: 'Warehouse robots',
+      description: 'Humidity-hardened warehouse robot',
+      price: 12900,
+      currency: 'USD',
+      availability: 'In stock',
+    }],
+  }],
 };
 
 const voice = {
@@ -32,6 +64,12 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('disrupt');
     expect(prompt).toContain(voice.exemplars[0]);
     expect(prompt).toContain(kernel.proofPoints[0]);
+    expect(prompt).toContain(kernel.founderStory.originSummary);
+    expect(prompt).toContain(kernel.pricingPosture.priceObjectionGuidance);
+    expect(prompt).toContain('Extra claims review required: yes');
+    expect(prompt).toContain('DockBot X1');
+    expect(prompt).toContain('price USD 12900');
+    expect(prompt).toContain('Do not invent a product, price');
   });
 
   it('omits every brand fact when usedKernel=false', () => {

@@ -35,18 +35,31 @@ function strings(value: unknown): string[] {
     : [];
 }
 
+function nullableNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function brandMemory(brand: { name: string; kernel: unknown; voice: unknown }) {
   const storedKernel = record(brand.kernel);
   const storedVoice = record(brand.voice);
   const visualIdentity = record(storedKernel.visualIdentity);
+  const storedPricing = record(storedKernel.pricingPosture);
+  const storedFounder = record(storedKernel.founderStory);
+  const storedClaims = record(storedKernel.regulatedClaims);
+  const storedProvenance = record(storedKernel.provenance);
+  const storedCatalogues = Array.isArray(storedKernel.productCatalogues)
+    ? storedKernel.productCatalogues
+    : [];
   const colors = Array.isArray(visualIdentity.colors)
     ? visualIdentity.colors
         .map((value) => text(record(value).hex, ""))
         .filter(Boolean)
     : [];
   const styleParts = [
+    ...strings(visualIdentity.fontFamilies),
     ...strings(visualIdentity.motifs),
     ...strings(visualIdentity.typographyCharacteristics),
+    ...strings(visualIdentity.usageNotes),
   ];
 
   return {
@@ -66,6 +79,74 @@ function brandMemory(brand: { name: string; kernel: unknown; voice: unknown }) {
         : [],
       differentiators: strings(storedKernel.differentiators),
       proofPoints: strings(storedKernel.proofPoints),
+      pricingPosture: storedKernel.pricingPosture
+        ? {
+            position: text(storedPricing.position, "unknown"),
+            summary: text(storedPricing.summary, ""),
+            signals: strings(storedPricing.signals),
+            priceObjectionGuidance: text(
+              storedPricing.priceObjectionGuidance,
+              "",
+            ),
+          }
+        : null,
+      founderStory: storedKernel.founderStory
+        ? {
+            founders: strings(storedFounder.founders),
+            foundingYear: text(storedFounder.foundingYear, ""),
+            originSummary: text(storedFounder.originSummary, ""),
+            foundingMotivation: text(storedFounder.foundingMotivation, ""),
+            milestones: strings(storedFounder.milestones),
+          }
+        : null,
+      regulatedClaims: storedKernel.regulatedClaims
+        ? {
+            status: text(storedClaims.status, "unknown"),
+            domains: strings(storedClaims.domains),
+            needsClaimsReview:
+              typeof storedClaims.needsClaimsReview === "boolean"
+                ? storedClaims.needsClaimsReview
+                : true,
+            rationale: text(storedClaims.rationale, ""),
+            substantiationRequirements: strings(
+              storedClaims.substantiationRequirements,
+            ),
+          }
+        : null,
+      productCatalogues: storedCatalogues.slice(0, 12).map((value) => {
+        const catalogue = record(value);
+        return {
+          fileName: text(catalogue.fileName, "Product catalogue"),
+          products: Array.isArray(catalogue.products)
+            ? catalogue.products.slice(0, 1_000).flatMap((productValue) => {
+                const product = record(productValue);
+                const name = text(product.name, "");
+                return name
+                  ? [{
+                      name,
+                      sku: text(product.sku, "") || null,
+                      category: text(product.category, "") || null,
+                      description: text(product.description, "") || null,
+                      price: nullableNumber(product.price),
+                      currency: text(product.currency, "") || null,
+                      compareAtPrice: nullableNumber(product.compareAtPrice),
+                      availability: text(product.availability, "") || null,
+                    }]
+                  : [];
+              })
+            : [],
+        };
+      }),
+      confirmedInformation: Array.isArray(storedProvenance.confirmedInformation)
+        ? storedProvenance.confirmedInformation.slice(-20).flatMap((value) => {
+            const item = record(value);
+            const field = text(item.field, "");
+            const confirmedValue = text(item.value, "");
+            return field && confirmedValue
+              ? [{ field, value: confirmedValue }]
+              : [];
+          })
+        : [],
     },
     voice: {
       toneAxes: Object.fromEntries(

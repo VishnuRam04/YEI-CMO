@@ -69,4 +69,22 @@ describe("Brand Analyst request parsing", () => {
     });
     await expect(parseBrandAnalystRequest(request)).rejects.toThrow("Content-Type");
   });
+
+  it("infers the Excel MIME type and labels a catalogue upload", async () => {
+    const form = new FormData();
+    form.set("brandId", "brand-catalogue");
+    form.set("catalogue", new File([Uint8Array.from([1, 2, 3])], "products.xlsx"));
+
+    const input = await parseBrandAnalystRequest(new Request(
+      "http://localhost/api/extract",
+      { method: "POST", body: form },
+    ));
+
+    expect(input.payload.sources[0]).toMatchObject({
+      kind: "document",
+      label: "product-catalogue",
+      fileName: "products.xlsx",
+      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+  });
 });

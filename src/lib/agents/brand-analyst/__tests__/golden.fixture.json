@@ -13,9 +13,18 @@
         "kind": "text",
         "label": "approved-copy",
         "title": "Founder notes",
-        "content": "Northwind gives lean B2B marketing teams an operating layer for strategy and execution."
+        "content": "Northwind was founded by Alex Kim in 2024 after watching lean marketing teams lose brand context between tools. It gives B2B teams an operating layer for strategy and execution. Northwind competes on premium operational value rather than the lowest price."
       }
     ],
+    "context": {
+      "regulatoryStatus": "not-regulated",
+      "regulatedDomains": [],
+      "fontNames": ["Inter"],
+      "visualGuidance": "Use editorial layouts with generous whitespace.",
+      "avoidVisualGuidance": "Avoid generic stock photography.",
+      "requiredWords": ["agentic CMO workspace"],
+      "bannedWords": ["revolutionary"]
+    },
     "forceRefresh": false
   },
   "modelResult": {
@@ -53,7 +62,27 @@
         }
       ],
       "proofPoints": ["Specialist agents share one durable brand memory"],
-      "competitors": []
+      "competitors": [],
+      "pricingPosture": {
+        "position": "premium",
+        "summary": "Competes on senior operational value rather than the lowest price.",
+        "signals": ["User-confirmed premium-value positioning"],
+        "priceObjectionGuidance": "Answer price concerns with the cost of fragmented execution, not discounts."
+      },
+      "founderStory": {
+        "founders": ["Alex Kim"],
+        "foundingYear": "2024",
+        "originSummary": "Northwind began after Alex Kim saw lean teams lose brand context between disconnected tools.",
+        "foundingMotivation": "Keep strategy and execution grounded in one durable brand memory.",
+        "milestones": []
+      },
+      "regulatedClaims": {
+        "status": "not-regulated",
+        "domains": [],
+        "needsClaimsReview": false,
+        "rationale": "The supplied evidence describes marketing operations software without regulated outcome claims.",
+        "substantiationRequirements": ["Support performance claims with campaign evidence."]
+      }
     },
     "voice": {
       "toneAxes": {
@@ -63,6 +92,7 @@
       },
       "do": ["Use precise operational language", "Connect claims to outcomes"],
       "dont": ["Use unsupported superlatives", "Sound like generic AI copy"],
+      "requiredWords": ["agentic CMO workspace"],
       "bannedWords": ["revolutionary"],
       "exemplars": [
         "An operating layer for strategy and execution.",
@@ -75,6 +105,7 @@
     "visualIdentity": {
       "logo": null,
       "colors": [],
+      "fontFamilies": ["Inter"],
       "typographyCharacteristics": [],
       "motifs": [],
       "usageNotes": ["No authoritative visual source was supplied."]
@@ -91,6 +122,24 @@
         "sourceId": "founder-notes",
         "excerptOrObservation": "lean B2B marketing teams",
         "confidence": 0.95
+      },
+      {
+        "field": "kernel.pricingPosture",
+        "sourceId": "founder-notes",
+        "excerptOrObservation": "competes on premium operational value rather than the lowest price",
+        "confidence": 1
+      },
+      {
+        "field": "kernel.founderStory",
+        "sourceId": "founder-notes",
+        "excerptOrObservation": "founded by Alex Kim in 2024",
+        "confidence": 1
+      },
+      {
+        "field": "kernel.regulatedClaims",
+        "sourceId": "user-context",
+        "excerptOrObservation": "regulatoryStatus: not-regulated",
+        "confidence": 1
       }
     ],
     "conflicts": [],

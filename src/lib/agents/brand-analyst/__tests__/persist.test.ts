@@ -39,6 +39,20 @@ describe("Brand Analyst persistence", () => {
           warnings: [],
         },
       ],
+      productCatalogues: [{
+        sourceId: "founder-notes",
+        fileName: "products.xlsx",
+        sheetNames: ["Products"],
+        totalRows: 1,
+        products: [{
+          name: "Northwind Plan",
+          price: 499,
+          currency: "USD",
+          sheet: "Products",
+          sourceRow: 2,
+        }],
+        warnings: [],
+      }],
     });
 
     await persistBrandProfile("brand-1", payload, result, "trace-1");
@@ -57,6 +71,10 @@ describe("Brand Analyst persistence", () => {
         traceId: "trace-1",
         crawledUrls: ["https://northwind.example"],
       },
+      productCatalogues: [expect.objectContaining({
+        fileName: "products.xlsx",
+        products: [expect.objectContaining({ name: "Northwind Plan", price: 499 })],
+      })],
     });
     expect(call.create.voice).toMatchObject({
       exemplars: modelResult.voice.exemplars,

@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import {
   Activity, BarChart3, BrainCircuit, CalendarDays, ChevronDown,
-  Command, FlaskConical, LayoutDashboard, Network, PenTool, ScanSearch, Sparkles,
+  Command, FlaskConical, LayoutDashboard, MessageCircle, Network, PenTool, ScanSearch, Sparkles,
 } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -12,6 +13,7 @@ const nav = [
   { href: "/", label: "Overview", icon: LayoutDashboard },
   { href: "/onboard", label: "Onboard", icon: ScanSearch },
   { href: "/brand", label: "Brand", icon: BrainCircuit },
+  { href: "/cmo", label: "CMO", icon: MessageCircle },
   { href: "/plan", label: "Plan", icon: CalendarDays },
   { href: "/studio/launch", label: "Studio", icon: PenTool },
   { href: "/proof", label: "Proof", icon: FlaskConical },
@@ -26,7 +28,21 @@ function isActive(pathname: string, href: string) {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const [workspaceName, setWorkspaceName] = useState("Northwind Labs");
   const current = nav.find((item) => isActive(pathname, item.href))?.label ?? "Workspace";
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/cmo")
+      .then((response) => response.ok ? response.json() : null)
+      .then((body) => {
+        if (!cancelled && body?.brand?.name) setWorkspaceName(body.brand.name);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname]);
 
   return (
     <div className="app-shell">
@@ -59,7 +75,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="main-column">
         <header className="topbar">
           <div className="mobile-brand"><span className="brand-mark" style={{ width: 28, height: 28, borderRadius: 8 }}><Command size={14} /></span>Northwind</div>
-          <div className="crumb"><span>Northwind Labs</span><span>/</span><strong>{current}</strong></div>
+          <div className="crumb"><span>{workspaceName}</span><span>/</span><strong>{current}</strong></div>
           <div className="top-actions">
             <div className="agent-pill"><span className="status-dot" /> 4 agents online</div>
             <button className="button button-primary"><Sparkles size={13} /> New campaign</button>

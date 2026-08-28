@@ -3,6 +3,7 @@ import fixture from "./golden.fixture.json";
 
 vi.mock("../extract", () => ({ extractBrandProfile: vi.fn() }));
 vi.mock("../persist", () => ({ persistBrandProfile: vi.fn() }));
+vi.mock("../confirm", () => ({ buildConfirmedBrandProfile: vi.fn() }));
 
 import { createBrandAnalystAgent } from "../index";
 import {
@@ -40,6 +41,7 @@ const prepared: PreparedSources = {
     },
   ],
   crawledUrls: [],
+  productCatalogues: [],
 };
 
 describe("Brand Analyst agent", () => {
@@ -63,6 +65,12 @@ describe("Brand Analyst agent", () => {
 
     expect(output.ok).toBe(true);
     expect(output.result?.kernel.positioning).toContain("AI operating layer");
+    expect(output.result?.voice.requiredWords).toContain("agentic CMO workspace");
+    expect(output.result?.voice.bannedWords).toContain("revolutionary");
+    expect(output.result?.visualIdentity.fontFamilies).toContain("Inter");
+    expect(output.result?.visualIdentity.usageNotes).toContain(
+      "Approved visual direction: Use editorial layouts with generous whitespace.",
+    );
     expect(output.telemetry.inputTokens).toBe(450);
     expect(output.telemetry.outputTokens).toBe(220);
     expect(persist).toHaveBeenCalledWith(

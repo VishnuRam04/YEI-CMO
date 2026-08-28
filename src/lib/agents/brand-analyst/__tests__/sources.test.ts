@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import ExcelJS from "@excel.js/exceljs";
 import { BrandAnalystPayloadSchema } from "../schema";
 import {
   assertPublicUrl,
@@ -91,5 +92,79 @@ describe("Brand Analyst source preparation", () => {
     expect(detectMediaType(new TextEncoder().encode("%PDF-1.7"))).toBe(
       "application/pdf",
     );
+  });
+
+  it("parses a real Excel product catalogue into structured pricing data", async () => {
+    const workbook = new ExcelJS.Workbook();
+    const products = workbook.addWorksheet("Products");
+    products.addRow([
+      "Product Name",
+      "SKU",
+      "Category",
+      "Description",
+      "Price",
+      "Currency",
+      "Compare At Price",
+      "Availability",
+      "Product URL",
+      "Size",
+    ]);
+    products.addRow([
+      "Focus Blend",
+      "FOCUS-01",
+      "Supplements",
+      "Daily focus blend",
+      129,
+      "MYR",
+      149,
+      "In stock",
+      "https://example.com/focus",
+      "30 servings",
+    ]);
+    products.addRow([
+      "Calm Blend",
+      "CALM-01",
+      "Supplements",
+      "Evening blend",
+      "RM 89.50",
+      "",
+      "",
+      "Pre-order",
+      "example.com/calm",
+      "20 servings",
+    ]);
+    const buffer = await workbook.xlsx.writeBuffer();
+    const payload = BrandAnalystPayloadSchema.parse({
+      sources: [{
+        id: "catalogue-1",
+        kind: "document",
+        label: "product-catalogue",
+        fileName: "products.xlsx",
+        mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        data: Buffer.from(buffer).toString("base64"),
+      }],
+    });
+
+    const prepared = await prepareBrandSources(payload);
+
+    expect(prepared.productCatalogues).toHaveLength(1);
+    expect(prepared.productCatalogues[0].products).toHaveLength(2);
+    expect(prepared.productCatalogues[0].products[0]).toMatchObject({
+      name: "Focus Blend",
+      sku: "FOCUS-01",
+      price: 129,
+      currency: "MYR",
+      compareAtPrice: 149,
+      availability: "In stock",
+      attributes: { Size: "30 servings" },
+    });
+    expect(prepared.productCatalogues[0].products[1]).toMatchObject({
+      name: "Calm Blend",
+      price: 89.5,
+      currency: "MYR",
+      url: "https://example.com/calm",
+    });
+    expect(prepared.sources[0].hasFile).toBe(false);
+    expect(prepared.sources[0].text).toContain("Focus Blend");
   });
 });

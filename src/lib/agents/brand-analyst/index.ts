@@ -2,6 +2,8 @@ import { MODELS } from "@/lib/agents/models";
 import { agentFailure, agentSuccess } from "@/lib/agents/output";
 import type { Agent, AgentInput } from "@/lib/agents/types";
 import { extractBrandProfile, type ExtractionOutput } from "./extract";
+import { buildConfirmedBrandProfile } from "./confirm";
+import { buildInformationRequests } from "./gaps";
 import { persistBrandProfile } from "./persist";
 import { reportBrandAnalystProgress } from "./progress";
 import {
@@ -24,12 +26,17 @@ export interface BrandAnalystDependencies {
     result: BrandAnalystResult,
     traceId: string,
   ): Promise<void>;
+  confirm(
+    brandId: string,
+    payload: BrandAnalystPayload,
+  ): Promise<BrandAnalystResult>;
 }
 
 const defaultDependencies: BrandAnalystDependencies = {
   prepareSources: prepareBrandSources,
   extract: extractBrandProfile,
   persist: persistBrandProfile,
+  confirm: buildConfirmedBrandProfile,
 };
 
 export function createBrandAnalystAgent(
@@ -42,6 +49,40 @@ export function createBrandAnalystAgent(
     model: MODELS.brandAnalyst,
 
     async run(input: AgentInput<BrandAnalystPayload>) {
+      if (input.payload.clarification) {
+        try {
+          const result = await dependencies.confirm(input.brandId, input.payload);
+          await dependencies.persist(
+            input.brandId,
+            input.payload,
+            result,
+            input.traceId,
+          );
+          return agentSuccess({
+            agentId: "brand-analyst",
+            traceId: input.traceId,
+            model: MODELS.brandAnalyst,
+            result,
+            summary: `Confirmed ${input.payload.clarification.field}`,
+            inputTokens: 0,
+            outputTokens: 0,
+          });
+        } catch (error) {
+          return agentFailure({
+            agentId: "brand-analyst",
+            traceId: input.traceId,
+            model: MODELS.brandAnalyst,
+            summary: "Clarification could not be saved",
+            error: {
+              code: "INPUT_ERROR",
+              message: "The confirmed brand information could not be applied.",
+              detail: error instanceof Error ? error.message : String(error),
+              retryable: false,
+            },
+          });
+        }
+      }
+
       reportBrandAnalystProgress(input.traceId, {
         phase: "ingesting",
         text: `Validating ${input.payload.sources.length || 1} brand sources`,
@@ -131,10 +172,50 @@ export function createBrandAnalystAgent(
         });
       }
 
-      const result = BrandAnalystResultSchema.parse({
+      const requiredWords = Array.from(new Set([
+        ...(input.payload.context?.requiredWords ?? []),
+        ...extraction.result.voice.requiredWords,
+      ]));
+      const bannedWords = Array.from(new Set([
+        ...(input.payload.context?.bannedWords ?? []),
+        ...extraction.result.voice.bannedWords,
+      ]));
+      const fontFamilies = Array.from(new Set([
+        ...(input.payload.context?.fontNames ?? []),
+        ...extraction.result.visualIdentity.fontFamilies,
+      ]));
+      const usageNotes = Array.from(new Set([
+        ...extraction.result.visualIdentity.usageNotes,
+        ...(input.payload.context?.visualGuidance
+          ? [`Approved visual direction: ${input.payload.context.visualGuidance}`]
+          : []),
+        ...(input.payload.context?.avoidVisualGuidance
+          ? [`Avoid this visual direction: ${input.payload.context.avoidVisualGuidance}`]
+          : []),
+      ]));
+      const baseResult = BrandAnalystResultSchema.parse({
         ...extraction.result,
+        voice: {
+          ...extraction.result.voice,
+          requiredWords,
+          bannedWords,
+        },
+        visualIdentity: {
+          ...extraction.result.visualIdentity,
+          fontFamilies,
+          usageNotes,
+        },
         crawledUrls: prepared.crawledUrls,
         sources: prepared.reports,
+        productCatalogues: prepared.productCatalogues,
+      });
+      const result = BrandAnalystResultSchema.parse({
+        ...baseResult,
+        informationRequests: buildInformationRequests({
+          result: extraction.result,
+          reports: prepared.reports,
+          productCatalogues: prepared.productCatalogues,
+        }),
       });
 
       reportBrandAnalystProgress(input.traceId, {

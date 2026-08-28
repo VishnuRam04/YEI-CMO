@@ -5,7 +5,7 @@ import { runAgent } from "@/lib/agents/run";
 import type { AgentEvent } from "@/lib/agents/types";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 const encoder = new TextEncoder();
 

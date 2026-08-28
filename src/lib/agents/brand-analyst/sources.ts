@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
+import ExcelJS from "@excel.js/exceljs";
 import { load } from "cheerio";
 import type { PromptSource } from "./prompt";
 import {
@@ -8,6 +9,7 @@ import {
   MAX_TOTAL_FILE_BYTES,
   type BrandAnalystPayload,
   type BrandSourceInput,
+  type ProductCatalogue,
   type SourceAuthority,
   type SourceReport,
 } from "./schema";
@@ -19,6 +21,11 @@ const MAX_TOTAL_TEXT = 90_000;
 const MAX_CRAWLED_PAGES = 4;
 const MAX_REDIRECTS = 4;
 const FETCH_TIMEOUT_MS = 7_000;
+const XLSX_MIME_TYPE =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const MAX_CATALOGUE_PRODUCTS = 1_000;
+const MAX_CATALOGUE_COLUMNS = 50;
+const MAX_HEADER_SCAN_ROWS = 20;
 
 type FetchImplementation = (
   input: string | URL | Request,
@@ -36,6 +43,7 @@ export interface PreparedFile {
 export interface PreparedSource extends PromptSource {
   checksum: string;
   file?: PreparedFile;
+  productCatalogue?: ProductCatalogue;
   crawledUrls: string[];
 }
 
@@ -43,6 +51,7 @@ export interface PreparedSources {
   sources: PreparedSource[];
   reports: SourceReport[];
   crawledUrls: string[];
+  productCatalogues: ProductCatalogue[];
 }
 
 export interface SourcePreparationDependencies {
@@ -407,6 +416,279 @@ function titleFor(source: BrandSourceInput, fallback: string): string {
   return source.title ?? ("fileName" in source ? source.fileName : fallback);
 }
 
+type CatalogueField =
+  | "name"
+  | "sku"
+  | "category"
+  | "description"
+  | "price"
+  | "currency"
+  | "compareAtPrice"
+  | "availability"
+  | "url";
+
+const catalogueHeaderAliases: Record<CatalogueField, string[]> = {
+  name: ["product", "product name", "name", "item", "item name", "title"],
+  sku: ["sku", "product id", "product code", "item code", "code"],
+  category: ["category", "product category", "collection", "product type"],
+  description: ["description", "product description", "details", "summary"],
+  price: ["price", "selling price", "sale price", "retail price", "unit price", "msrp", "rrp"],
+  currency: ["currency", "currency code"],
+  compareAtPrice: ["compare at price", "compare-at price", "original price", "list price", "regular price"],
+  availability: ["availability", "stock", "stock status", "inventory status", "status"],
+  url: ["url", "link", "product url", "product link", "page url"],
+};
+
+function normaliseHeader(value: string): string {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/[^a-zA-Z0-9 ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+const catalogueFieldByHeader = new Map<string, CatalogueField>(
+  Object.entries(catalogueHeaderAliases).flatMap(([field, aliases]) =>
+    aliases.map((alias) => [normaliseHeader(alias), field as CatalogueField]),
+  ),
+);
+
+function cleanCellText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function spreadsheetCellText(cell: { text: string; value: unknown }): string {
+  const text = cleanCellText(cell.text ?? "");
+  if (text) return text;
+
+  const value = cell.value;
+  if (value === null || value === undefined) return "";
+  if (value instanceof Date) return value.toISOString();
+  if (["string", "number", "boolean"].includes(typeof value)) {
+    return cleanCellText(String(value));
+  }
+  if (typeof value === "object") {
+    const item = value as {
+      result?: unknown;
+      text?: unknown;
+      hyperlink?: unknown;
+      richText?: Array<{ text?: unknown }>;
+    };
+    if (item.result !== undefined && item.result !== null) {
+      return cleanCellText(String(item.result));
+    }
+    if (typeof item.text === "string") return cleanCellText(item.text);
+    if (Array.isArray(item.richText)) {
+      return cleanCellText(
+        item.richText.map((part) => String(part.text ?? "")).join(""),
+      );
+    }
+    if (typeof item.hyperlink === "string") return cleanCellText(item.hyperlink);
+  }
+  return "";
+}
+
+function parseCataloguePrice(value: string, rawValue: unknown): number | null {
+  if (typeof rawValue === "number" && Number.isFinite(rawValue) && rawValue >= 0) {
+    return rawValue;
+  }
+  const negative = /^\s*\(/.test(value) || /-\s*\d/.test(value);
+  const numeric = value
+    .replace(/\s/g, "")
+    .replace(/,(?=\d{3}(?:\D|$))/g, "")
+    .replace(/[^0-9.,-]/g, "")
+    .replace(/,(?=\d{1,2}$)/, ".")
+    .replace(/,/g, "");
+  const parsed = Number.parseFloat(numeric);
+  return !negative && Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function normaliseCurrency(explicit: string, priceText: string): string | null {
+  const combined = `${explicit} ${priceText}`.toUpperCase();
+  const known: Array<[RegExp, string]> = [
+    [/\b(?:MYR|RM)\b/, "MYR"],
+    [/\bSGD\b|S\$/, "SGD"],
+    [/\bAUD\b|A\$/, "AUD"],
+    [/\bCAD\b|C\$/, "CAD"],
+    [/\bUSD\b|US\$/, "USD"],
+    [/\bEUR\b|€/, "EUR"],
+    [/\bGBP\b|£/, "GBP"],
+    [/\bJPY\b|¥/, "JPY"],
+    [/\bINR\b|₹/, "INR"],
+  ];
+  const match = known.find(([pattern]) => pattern.test(combined));
+  if (match) return match[1];
+  const code = explicit.trim().toUpperCase();
+  return /^[A-Z]{3}$/.test(code) ? code : null;
+}
+
+function safeProductUrl(value: string): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(/^[a-z][a-z\d+.-]*:/i.test(value) ? value : `https://${value}`);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function cataloguePromptText(catalogue: ProductCatalogue): string {
+  const lines = catalogue.products.slice(0, 100).map((product) => {
+    const values = [
+      `name=${JSON.stringify(product.name)}`,
+      product.sku ? `sku=${JSON.stringify(product.sku)}` : "",
+      product.category ? `category=${JSON.stringify(product.category)}` : "",
+      product.price !== null ? `price=${product.price}` : "",
+      product.currency ? `currency=${product.currency}` : "",
+      product.compareAtPrice !== null ? `compareAtPrice=${product.compareAtPrice}` : "",
+      product.availability ? `availability=${JSON.stringify(product.availability)}` : "",
+      product.description ? `description=${JSON.stringify(product.description)}` : "",
+    ].filter(Boolean);
+    return `- ${values.join("; ")}`;
+  });
+  const omitted = catalogue.products.length - lines.length;
+  return [
+    `[PRODUCT CATALOGUE ${JSON.stringify(catalogue.fileName)}]`,
+    `Parsed products: ${catalogue.products.length}`,
+    ...lines,
+    omitted > 0 ? `[${omitted} additional products omitted from model context]` : "",
+  ].filter(Boolean).join("\n").slice(0, MAX_TEXT_PER_SOURCE);
+}
+
+export async function parseProductCatalogue(
+  bytes: Uint8Array,
+  sourceId: string,
+  fileName: string,
+): Promise<ProductCatalogue> {
+  const workbook = new ExcelJS.Workbook();
+  try {
+    await workbook.xlsx.load(Buffer.from(bytes));
+  } catch {
+    throw new Error("The product catalogue is not a readable .xlsx workbook.");
+  }
+
+  const products: ProductCatalogue["products"] = [];
+  const warnings: string[] = [];
+  let totalRows = 0;
+
+  for (const worksheet of workbook.worksheets) {
+    if (products.length >= MAX_CATALOGUE_PRODUCTS) break;
+    let headerRowNumber = 0;
+    let mappedHeaders = new Map<CatalogueField, number>();
+    let originalHeaders = new Map<number, string>();
+
+    for (
+      let rowNumber = 1;
+      rowNumber <= Math.min(worksheet.actualRowCount, MAX_HEADER_SCAN_ROWS);
+      rowNumber += 1
+    ) {
+      const candidate = worksheet.getRow(rowNumber);
+      const fields = new Map<CatalogueField, number>();
+      const labels = new Map<number, string>();
+      for (
+        let column = 1;
+        column <= Math.min(candidate.cellCount, MAX_CATALOGUE_COLUMNS);
+        column += 1
+      ) {
+        const label = spreadsheetCellText(candidate.getCell(column));
+        if (!label) continue;
+        labels.set(column, label.slice(0, 160));
+        const field = catalogueFieldByHeader.get(normaliseHeader(label));
+        if (field && !fields.has(field)) fields.set(field, column);
+      }
+      if (fields.has("name")) {
+        headerRowNumber = rowNumber;
+        mappedHeaders = fields;
+        originalHeaders = labels;
+        break;
+      }
+    }
+
+    if (!headerRowNumber) {
+      warnings.push(`${worksheet.name}: no Product Name column was found; sheet skipped.`);
+      continue;
+    }
+    if (!mappedHeaders.has("price")) {
+      warnings.push(`${worksheet.name}: no Price column was found.`);
+    }
+
+    for (let rowNumber = headerRowNumber + 1; rowNumber <= worksheet.actualRowCount; rowNumber += 1) {
+      if (products.length >= MAX_CATALOGUE_PRODUCTS) break;
+      const row = worksheet.getRow(rowNumber);
+      const nameColumn = mappedHeaders.get("name")!;
+      const name = spreadsheetCellText(row.getCell(nameColumn)).slice(0, 300);
+      const rowHasValues = [...originalHeaders.keys()].some((column) =>
+        Boolean(spreadsheetCellText(row.getCell(column))),
+      );
+      if (!rowHasValues) continue;
+      totalRows += 1;
+      if (!name) {
+        if (warnings.length < 50) {
+          warnings.push(`${worksheet.name} row ${rowNumber}: missing Product Name; row skipped.`);
+        }
+        continue;
+      }
+
+      const fieldText = (field: CatalogueField) => {
+        const column = mappedHeaders.get(field);
+        return column ? spreadsheetCellText(row.getCell(column)) : "";
+      };
+      const nullableText = (field: CatalogueField, maximum: number) =>
+        fieldText(field).slice(0, maximum) || null;
+      const priceColumn = mappedHeaders.get("price");
+      const compareColumn = mappedHeaders.get("compareAtPrice");
+      const priceText = fieldText("price");
+      const currencyText = fieldText("currency");
+      const attributes: Record<string, string> = {};
+
+      for (const [column, label] of originalHeaders) {
+        if ([...mappedHeaders.values()].includes(column)) continue;
+        const value = spreadsheetCellText(row.getCell(column));
+        if (value) attributes[label] = value.slice(0, 1_000);
+      }
+
+      products.push({
+        name,
+        sku: nullableText("sku", 160),
+        category: nullableText("category", 300),
+        description: nullableText("description", 2_000),
+        price: priceColumn
+          ? parseCataloguePrice(priceText, row.getCell(priceColumn).value)
+          : null,
+        currency: normaliseCurrency(currencyText, priceText),
+        compareAtPrice: compareColumn
+          ? parseCataloguePrice(fieldText("compareAtPrice"), row.getCell(compareColumn).value)
+          : null,
+        availability: nullableText("availability", 160),
+        url: safeProductUrl(fieldText("url")),
+        attributes,
+        sheet: worksheet.name.slice(0, 160),
+        sourceRow: rowNumber,
+      });
+    }
+  }
+
+  if (products.length >= MAX_CATALOGUE_PRODUCTS) {
+    warnings.push(`Catalogue was limited to the first ${MAX_CATALOGUE_PRODUCTS} products.`);
+  }
+  if (products.length === 0) {
+    const detail = warnings[0] ? ` ${warnings[0]}` : "";
+    throw new Error(`No products could be read from the catalogue.${detail}`);
+  }
+
+  return {
+    sourceId,
+    fileName,
+    sheetNames: workbook.worksheets.slice(0, 100).map((sheet) => sheet.name),
+    totalRows,
+    products,
+    warnings: warnings.slice(0, 50),
+  };
+}
+
 async function prepareFileSource(
   id: string,
   source: Extract<BrandSourceInput, { kind: "image" | "document" }>,
@@ -451,6 +733,17 @@ async function prepareFileSource(
     crawledUrls: source.url ? [source.url] : [],
     warnings: [] as string[],
   };
+
+  if (source.kind === "document" && source.mimeType === XLSX_MIME_TYPE) {
+    const productCatalogue = await parseProductCatalogue(bytes, id, source.fileName);
+    return {
+      ...base,
+      text: cataloguePromptText(productCatalogue),
+      hasFile: false,
+      warnings: productCatalogue.warnings,
+      productCatalogue,
+    };
+  }
 
   if (source.kind === "document" && source.mimeType !== "application/pdf") {
     const rawText = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
@@ -675,5 +968,8 @@ export async function prepareBrandSources(
     sources: prepared,
     reports,
     crawledUrls: [...new Set(prepared.flatMap((source) => source.crawledUrls))],
+    productCatalogues: prepared.flatMap((source) =>
+      source.productCatalogue ? [source.productCatalogue] : [],
+    ),
   };
 }

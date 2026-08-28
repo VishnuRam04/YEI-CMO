@@ -9,7 +9,7 @@ import type {
 } from "@/lib/agents/types";
 
 const timeoutFor = (agentId: AgentId) =>
-  agentId === "brand-analyst" ? 30_000 : 20_000;
+  agentId === "brand-analyst" ? 110_000 : 20_000;
 
 function normaliseError(error: unknown): AgentError {
   if (error instanceof ZodError) {

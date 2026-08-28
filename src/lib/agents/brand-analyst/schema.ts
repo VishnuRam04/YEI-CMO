@@ -1,8 +1,9 @@
 import { z } from "zod";
 
-export const MAX_SOURCE_COUNT = 12;
+export const MAX_SOURCE_COUNT = 24;
 export const MAX_INLINE_FILE_BYTES = 8 * 1024 * 1024;
 export const MAX_TOTAL_FILE_BYTES = 20 * 1024 * 1024;
+export const MAX_LANGUAGE_GUIDANCE_CHARS = 10_000;
 
 export const SourceAuthoritySchema = z.enum([
   "user-confirmed",
@@ -81,6 +82,7 @@ const documentMimeTypeSchema = z.enum([
   "application/pdf",
   "application/json",
   "application/rtf",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "text/plain",
   "text/html",
   "text/csv",
@@ -135,21 +137,54 @@ export const BrandSourceInputSchema = z.union([
 
 export const BrandContextSchema = z.object({
   industry: z.string().trim().min(1).max(160).optional(),
+  pricingPosture: z.string().trim().min(1).max(2_000).optional(),
+  founderStory: z.string().trim().min(1).max(10_000).optional(),
+  regulatoryStatus: z
+    .enum(["regulated", "not-regulated", "unsure"])
+    .optional(),
+  regulatedDomains: z
+    .array(z.string().trim().min(1).max(160))
+    .max(20)
+    .default([]),
+  fontNames: z.array(z.string().trim().min(1).max(160)).max(20).default([]),
+  visualGuidance: z.string().trim().min(1).max(10_000).optional(),
+  avoidVisualGuidance: z.string().trim().min(1).max(10_000).optional(),
   markets: z.array(z.string().trim().min(1).max(160)).max(20).default([]),
   priorities: z.array(z.string().trim().min(1).max(300)).max(20).default([]),
   audiences: z.array(z.string().trim().min(1).max(300)).max(20).default([]),
   competitors: z.array(z.string().trim().min(1).max(160)).max(30).default([]),
-  requiredWords: z.array(z.string().trim().min(1).max(100)).max(50).default([]),
-  bannedWords: z.array(z.string().trim().min(1).max(100)).max(50).default([]),
+  requiredWords: z
+    .array(z.string().trim().min(1).max(MAX_LANGUAGE_GUIDANCE_CHARS))
+    .max(50)
+    .default([]),
+  bannedWords: z
+    .array(z.string().trim().min(1).max(MAX_LANGUAGE_GUIDANCE_CHARS))
+    .max(50)
+    .default([]),
   disclaimers: z.array(z.string().trim().min(1).max(500)).max(20).default([]),
   notes: z.string().trim().min(1).max(10_000).optional(),
+});
+
+export const BrandClarificationSchema = z.object({
+  requestId: sourceIdSchema,
+  field: z.string().trim().min(1).max(160),
+  question: z.string().trim().min(1).max(500),
+  answer: z.string().trim().min(1).max(5_000),
+  conversationId: z.string().trim().min(1).max(160).optional(),
 });
 
 const hasContext = (context: z.infer<typeof BrandContextSchema> | undefined) =>
   Boolean(
     context &&
       (context.industry ||
+        context.pricingPosture ||
+        context.founderStory ||
+        context.regulatoryStatus ||
+        context.visualGuidance ||
+        context.avoidVisualGuidance ||
         context.notes ||
+        context.regulatedDomains.length ||
+        context.fontNames.length ||
         context.markets.length ||
         context.priorities.length ||
         context.audiences.length ||
@@ -165,10 +200,16 @@ const rawPayloadSchema = z
     url: HttpUrlSchema.optional(),
     sources: z.array(BrandSourceInputSchema).max(MAX_SOURCE_COUNT).default([]),
     context: BrandContextSchema.optional(),
+    clarification: BrandClarificationSchema.optional(),
     forceRefresh: z.boolean().default(false),
   })
   .superRefine((value, context) => {
-    if (!value.url && value.sources.length === 0 && !hasContext(value.context)) {
+    if (
+      !value.url &&
+      value.sources.length === 0 &&
+      !hasContext(value.context) &&
+      !value.clarification
+    ) {
       context.addIssue({
         code: "custom",
         message: "Provide at least one URL, source, upload, or structured context.",
@@ -212,14 +253,77 @@ export const BrandAnalystPayloadSchema = rawPayloadSchema.transform((value) => {
 
 const icpSchema = z.object({
   name: z.string().trim().min(1),
-  needs: z.array(z.string().trim().min(1)).min(1),
+  needs: z.array(z.string().trim().min(1)).default([]),
 });
 
-export const BrandKernelSchema = z.object({
+export const PricingPostureSchema = z.object({
+  position: z
+    .enum([
+      "budget",
+      "value",
+      "mid-market",
+      "premium",
+      "luxury",
+      "freemium",
+      "mixed",
+      "unknown",
+    ])
+    .default("unknown"),
+  summary: z.string().trim().max(1_000).default(""),
+  signals: z.array(z.string().trim().min(1).max(500)).max(20).default([]),
+  priceObjectionGuidance: z.string().trim().min(1).max(1_000).optional(),
+});
+
+export const FounderStorySchema = z.object({
+  founders: z.array(z.string().trim().min(1).max(160)).max(20).default([]),
+  foundingYear: z.string().trim().min(1).max(40).optional(),
+  originSummary: z.string().trim().max(2_000).default(""),
+  foundingMotivation: z.string().trim().min(1).max(1_000).optional(),
+  milestones: z.array(z.string().trim().min(1).max(500)).max(20).default([]),
+});
+
+export const RegulatedClaimsSchema = z.object({
+  status: z
+    .enum(["regulated", "potentially-regulated", "not-regulated", "unknown"])
+    .default("unknown"),
+  domains: z.array(z.string().trim().min(1).max(160)).max(20).default([]),
+  needsClaimsReview: z.boolean().default(true),
+  rationale: z.string().trim().max(1_000).default(""),
+  substantiationRequirements: z
+    .array(z.string().trim().min(1).max(500))
+    .max(20)
+    .default([]),
+});
+
+export const CatalogueProductSchema = z.object({
+  name: z.string().trim().min(1).max(300),
+  sku: z.string().trim().min(1).max(160).nullable().default(null),
+  category: z.string().trim().min(1).max(300).nullable().default(null),
+  description: z.string().trim().min(1).max(2_000).nullable().default(null),
+  price: z.number().finite().nonnegative().nullable().default(null),
+  currency: z.string().trim().min(1).max(20).nullable().default(null),
+  compareAtPrice: z.number().finite().nonnegative().nullable().default(null),
+  availability: z.string().trim().min(1).max(160).nullable().default(null),
+  url: HttpUrlSchema.nullable().default(null),
+  attributes: z.record(z.string(), z.string().max(1_000)).default({}),
+  sheet: z.string().trim().min(1).max(160),
+  sourceRow: z.number().int().positive(),
+});
+
+export const ProductCatalogueSchema = z.object({
+  sourceId: sourceIdSchema,
+  fileName: z.string().trim().min(1).max(255),
+  sheetNames: z.array(z.string().trim().min(1).max(160)).max(100),
+  totalRows: z.number().int().nonnegative(),
+  products: z.array(CatalogueProductSchema).max(1_000),
+  warnings: z.array(z.string().trim().min(1).max(500)).max(50).default([]),
+});
+
+export const BrandKernelCoreSchema = z.object({
   positioning: z.string().trim().min(1),
   category: z.string().trim().min(1),
-  icps: z.array(icpSchema).min(2).max(3),
-  differentiators: z.array(z.string().trim().min(1)).length(3),
+  icps: z.array(icpSchema).max(3).default([]),
+  differentiators: z.array(z.string().trim().min(1)).max(3).default([]),
   objections: z
     .array(
       z.object({
@@ -227,17 +331,32 @@ export const BrandKernelSchema = z.object({
         rebuttal: z.string().trim().min(1),
       }),
     )
-    .length(3),
-  proofPoints: z.array(z.string().trim().min(1)),
-  competitors: z.array(z.string().trim().min(1)),
+    .max(3)
+    .default([]),
+  proofPoints: z.array(z.string().trim().min(1)).default([]),
+  competitors: z.array(z.string().trim().min(1)).default([]),
+  pricingPosture: PricingPostureSchema.nullable().default(null),
+  founderStory: FounderStorySchema.nullable().default(null),
+  regulatedClaims: RegulatedClaimsSchema.nullable().default(null),
+});
+
+export const BrandKernelSchema = BrandKernelCoreSchema.extend({
+  productCatalogues: z.array(ProductCatalogueSchema).max(12).default([]),
 });
 
 export const BrandVoiceSchema = z.object({
-  toneAxes: z.record(z.string(), z.number().int().min(1).max(5)),
-  do: z.array(z.string().trim().min(1)),
-  dont: z.array(z.string().trim().min(1)),
-  bannedWords: z.array(z.string().trim().min(1)),
-  exemplars: z.array(z.string().trim().min(1)).min(5).max(10),
+  toneAxes: z.record(z.string(), z.number().int().min(1).max(5)).default({}),
+  do: z.array(z.string().trim().min(1).max(300)).max(20).default([]),
+  dont: z.array(z.string().trim().min(1).max(300)).max(20).default([]),
+  requiredWords: z
+    .array(z.string().trim().min(1).max(MAX_LANGUAGE_GUIDANCE_CHARS))
+    .max(50)
+    .default([]),
+  bannedWords: z
+    .array(z.string().trim().min(1).max(MAX_LANGUAGE_GUIDANCE_CHARS))
+    .max(50)
+    .default([]),
+  exemplars: z.array(z.string().trim().min(1).max(500)).max(10).default([]),
 });
 
 export const VisualIdentitySchema = z.object({
@@ -245,10 +364,11 @@ export const VisualIdentitySchema = z.object({
     .object({
       sourceId: sourceIdSchema,
       type: z.enum(["symbol", "wordmark", "combination", "unknown"]),
-      visibleText: z.array(z.string().trim().min(1)),
+      visibleText: z.array(z.string().trim().min(1)).default([]),
       tagline: z.string().trim().min(1).optional(),
     })
-    .nullable(),
+    .nullable()
+    .default(null),
   colors: z.array(
     z.object({
       hex: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
@@ -256,10 +376,11 @@ export const VisualIdentitySchema = z.object({
       sourceId: sourceIdSchema,
       confidence: z.number().min(0).max(1),
     }),
-  ),
-  typographyCharacteristics: z.array(z.string().trim().min(1)),
-  motifs: z.array(z.string().trim().min(1)),
-  usageNotes: z.array(z.string().trim().min(1)),
+  ).default([]),
+  fontFamilies: z.array(z.string().trim().min(1).max(160)).max(20).default([]),
+  typographyCharacteristics: z.array(z.string().trim().min(1)).default([]),
+  motifs: z.array(z.string().trim().min(1)).default([]),
+  usageNotes: z.array(z.string().trim().min(1)).default([]),
 });
 
 export const EvidenceItemSchema = z.object({
@@ -283,14 +404,41 @@ export const ConflictSchema = z.object({
   question: z.string().trim().min(1).max(500),
 });
 
+export const InformationRequestSchema = z.object({
+  id: sourceIdSchema,
+  field: z.string().trim().min(1).max(160),
+  severity: z.enum(["blocking", "review", "optional"]),
+  resolution: z.enum([
+    "ask-user",
+    "research-publicly",
+    "choose-conflict",
+    "upload-catalogue",
+  ]),
+  reason: z.string().trim().min(1).max(800),
+  affects: z.array(z.string().trim().min(1).max(160)).max(10).default([]),
+  canResearch: z.boolean().default(false),
+  question: z.string().trim().min(1).max(500),
+  options: z.array(z.string().trim().min(1).max(300)).max(8).default([]),
+});
+
+export const ConfirmedInformationSchema = z.object({
+  requestId: sourceIdSchema,
+  field: z.string().trim().min(1).max(160),
+  question: z.string().trim().min(1).max(500),
+  value: z.string().trim().min(1).max(5_000),
+  sourceId: sourceIdSchema,
+  confirmedAt: z.string().datetime(),
+  conversationId: z.string().trim().min(1).max(160).optional(),
+});
+
 export const BrandAnalystModelResultSchema = z.object({
   brandName: z.string().trim().min(1).max(160),
-  kernel: BrandKernelSchema,
+  kernel: BrandKernelCoreSchema,
   voice: BrandVoiceSchema,
   visualIdentity: VisualIdentitySchema,
-  evidence: z.array(EvidenceItemSchema).min(1),
-  conflicts: z.array(ConflictSchema),
-  missingInformation: z.array(z.string().trim().min(1).max(500)),
+  evidence: z.array(EvidenceItemSchema).default([]),
+  conflicts: z.array(ConflictSchema).default([]),
+  missingInformation: z.array(z.string().trim().min(1).max(500)).default([]),
 });
 
 export const SourceReportSchema = z.object({
@@ -312,6 +460,9 @@ export const SourceReportSchema = z.object({
 export const BrandAnalystResultSchema = BrandAnalystModelResultSchema.extend({
   crawledUrls: z.array(HttpUrlSchema),
   sources: z.array(SourceReportSchema).min(1),
+  productCatalogues: z.array(ProductCatalogueSchema).max(12).default([]),
+  informationRequests: z.array(InformationRequestSchema).max(50).default([]),
+  confirmedInformation: z.array(ConfirmedInformationSchema).max(100).default([]),
 });
 
 export type BrandSourceInput = z.infer<typeof BrandSourceInputSchema>;
@@ -320,5 +471,8 @@ export type BrandAnalystModelResult = z.infer<
   typeof BrandAnalystModelResultSchema
 >;
 export type BrandAnalystResult = z.infer<typeof BrandAnalystResultSchema>;
+export type ProductCatalogue = z.infer<typeof ProductCatalogueSchema>;
+export type InformationRequest = z.infer<typeof InformationRequestSchema>;
+export type ConfirmedInformation = z.infer<typeof ConfirmedInformationSchema>;
 export type SourceAuthority = z.infer<typeof SourceAuthoritySchema>;
 export type SourceReport = z.infer<typeof SourceReportSchema>;

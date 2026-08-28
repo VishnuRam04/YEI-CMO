@@ -1,9 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { agentSuccess } from "../output";
 import { runAgent } from "../run";
 import type { Agent } from "../types";
 
 describe("runAgent", () => {
+  afterEach(() => vi.useRealTimers());
+
   it("normalises identity, summary and telemetry", async () => {
     const agent: Agent<{ value: string }, { value: string }> = {
       id: "copywriter",
@@ -31,5 +33,35 @@ describe("runAgent", () => {
     expect(output.summary).toHaveLength(40);
     expect(output.telemetry.costUsd).toBeGreaterThan(0);
     expect(output.telemetry.finishedAt).not.toBe("");
+  });
+
+  it("allows Brand Analyst runs to exceed the old 30-second ceiling", async () => {
+    vi.useFakeTimers();
+    const agent: Agent<Record<string, never>, { saved: boolean }> = {
+      id: "brand-analyst",
+      model: "gemini-3.1-pro-preview",
+      async run(input) {
+        await new Promise((resolve) => setTimeout(resolve, 35_000));
+        return agentSuccess({
+          agentId: "brand-analyst",
+          traceId: input.traceId,
+          model: "gemini-3.1-pro-preview",
+          result: { saved: true },
+          summary: "Brand saved",
+        });
+      },
+    };
+
+    const pending = runAgent(agent, {
+      brandId: "brand_1",
+      traceId: "trace_long",
+      payload: {},
+    });
+    await vi.advanceTimersByTimeAsync(35_000);
+
+    await expect(pending).resolves.toMatchObject({
+      ok: true,
+      result: { saved: true },
+    });
   });
 });

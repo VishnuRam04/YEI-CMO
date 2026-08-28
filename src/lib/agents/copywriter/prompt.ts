@@ -14,6 +14,40 @@ type BrandKernel = {
   icps?: Array<{ name: string; needs: string[] }>;
   differentiators?: string[];
   proofPoints?: string[];
+  pricingPosture?: {
+    position?: string;
+    summary?: string;
+    signals?: string[];
+    priceObjectionGuidance?: string;
+  } | null;
+  founderStory?: {
+    founders?: string[];
+    foundingYear?: string;
+    originSummary?: string;
+    foundingMotivation?: string;
+    milestones?: string[];
+  } | null;
+  regulatedClaims?: {
+    status?: string;
+    domains?: string[];
+    needsClaimsReview?: boolean;
+    rationale?: string;
+    substantiationRequirements?: string[];
+  } | null;
+  productCatalogues?: Array<{
+    fileName: string;
+    products: Array<{
+      name: string;
+      sku?: string | null;
+      category?: string | null;
+      description?: string | null;
+      price?: number | null;
+      currency?: string | null;
+      compareAtPrice?: number | null;
+      availability?: string | null;
+    }>;
+  }>;
+  confirmedInformation?: Array<{ field: string; value: string }>;
 };
 
 type VoiceProfile = {
@@ -47,6 +81,28 @@ copy for the brief you are given. You have no information about the specific
 brand beyond its name — do not invent specifics, positioning, or proof points.`;
   }
 
+  const catalogueProducts = (kernel.productCatalogues ?? [])
+    .flatMap((catalogue) => catalogue.products)
+    .slice(0, 50);
+  const catalogueText = catalogueProducts.length
+    ? catalogueProducts.map((product) => {
+        const facts = [
+          product.name,
+          product.sku ? `SKU ${product.sku}` : "",
+          product.category ? `category ${product.category}` : "",
+          product.price !== null && product.price !== undefined
+            ? `price ${product.currency ? `${product.currency} ` : ""}${product.price}`
+            : "",
+          product.compareAtPrice !== null && product.compareAtPrice !== undefined
+            ? `compare-at ${product.currency ? `${product.currency} ` : ""}${product.compareAtPrice}`
+            : "",
+          product.availability ? `availability ${product.availability}` : "",
+          product.description ? `description ${product.description}` : "",
+        ].filter(Boolean);
+        return `- ${facts.join("; ")}`;
+      }).join("\n")
+    : "No product catalogue supplied.";
+
   return `You are the Copywriter agent for ${kernel.name}.
 
 ROLE AND SAFETY
@@ -64,6 +120,39 @@ Audiences: ${kernel.icps?.map((icp) => `${icp.name} (${icp.needs.join("; ")})`).
 Differentiators: ${kernel.differentiators?.join("; ") || "Not established"}
 Approved proof points: ${kernel.proofPoints?.join("; ") || "None supplied. Do not imply validation, results, traction, research, or customer feedback."}
 
+USER-CONFIRMED INFORMATION
+${kernel.confirmedInformation?.map((item) => `- ${item.field}: ${item.value}`).join("\n") || "No additional user-confirmed facts supplied."}
+
+PRICING POSTURE
+Position: ${kernel.pricingPosture?.position || "Not established"}
+Summary: ${kernel.pricingPosture?.summary || "Not established"}
+Signals: ${kernel.pricingPosture?.signals?.join("; ") || "None supplied"}
+Price-objection guidance: ${kernel.pricingPosture?.priceObjectionGuidance || "None supplied"}
+
+PRODUCT CATALOGUE
+${catalogueText}
+Treat product names, SKUs, listed prices, currencies, and availability as exact
+first-party facts. Do not invent a product, price, discount, bundle, feature, or
+stock status. A catalogue description is not proof of performance and does not
+override the claims-risk guardrail below.
+
+FOUNDER AND ORIGIN STORY
+Founders: ${kernel.founderStory?.founders?.join(", ") || "Not established"}
+Founded: ${kernel.founderStory?.foundingYear || "Not established"}
+Origin: ${kernel.founderStory?.originSummary || "Not established"}
+Motivation: ${kernel.founderStory?.foundingMotivation || "Not established"}
+Milestones: ${kernel.founderStory?.milestones?.join("; ") || "None supplied"}
+
+CLAIMS-RISK GUARDRAIL
+Status: ${kernel.regulatedClaims?.status || "Unknown"}
+Domains: ${kernel.regulatedClaims?.domains?.join(", ") || "Not established"}
+Extra claims review required: ${kernel.regulatedClaims?.needsClaimsReview === false ? "no" : "yes"}
+Rationale: ${kernel.regulatedClaims?.rationale || "No assessment supplied"}
+Substantiation requirements: ${kernel.regulatedClaims?.substantiationRequirements?.join("; ") || "None supplied"}
+When extra review is required, avoid health, financial, safety, performance,
+or outcome claims unless the exact claim appears in approved proof points.
+Preserve any supplied qualification or disclaimer and never strengthen a claim.
+
 VOICE PROFILE
 Tone: ${formatToneAxes(voice.toneAxes)}
 Always: ${voice.do.join('; ')}
@@ -78,6 +167,9 @@ Use only facts explicitly present in this approved memory or the user's brief.
 For the proof-led angle, use only the approved proof points above. If none are
 available, lead with an approved product mechanism without calling it proven,
 validated, research-backed, customer-led, or results-driven.
+Use founder-story material only when the confirmed origin fields above contain
+the relevant fact. Handle price objections according to the approved pricing
+posture rather than defaulting to discounts or premium language.
 `;
 }
 
