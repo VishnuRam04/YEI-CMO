@@ -96,16 +96,16 @@ export interface PosterCopyPayload {
  * is regenerated rather than being cut.
  */
 export const PosterCopySchema = z.object({
-  headline: z.string().trim().min(1).max(38)
-    .refine((value) => value.split(/\s+/).length <= 6, "Use at most six words."),
-  subheadline: z.string().trim().min(1).max(52)
-    .refine((value) => value.split(/\s+/).length <= 9, "Use at most nine words."),
+  headline: z.string().trim().min(1).max(64)
+    .refine((value) => value.split(/\s+/).length <= 8, "Use at most eight words."),
+  subheadline: z.string().trim().min(1).max(96)
+    .refine((value) => value.split(/\s+/).length <= 12, "Use at most twelve words."),
   highlights: z.array(
-    z.string().trim().min(1).max(26)
-      .refine((value) => value.split(/\s+/).length <= 4, "Use at most four words."),
+    z.string().trim().min(1).max(40)
+      .refine((value) => value.split(/\s+/).length <= 5, "Use at most five words."),
   ).min(2).max(3),
-  callToAction: z.string().trim().min(1).max(30)
-    .refine((value) => value.split(/\s+/).length <= 5, "Use at most five words."),
+  callToAction: z.string().trim().min(1).max(48)
+    .refine((value) => value.split(/\s+/).length <= 6, "Use at most six words."),
 });
 
 export type PosterCopyModelOutput = z.infer<typeof PosterCopySchema>;
@@ -195,6 +195,8 @@ export interface ImageGenerationResult {
   imageUrl: string;
   mimeType: string;
   tier: ImageTier;
+  /** The Brand Judge's verdict on the wording set into the poster. */
+  brandAudit?: BrandAuditReport[];
 }
 
 export type CopywriterResult = TextGenerationResult | ImageGenerationResult;

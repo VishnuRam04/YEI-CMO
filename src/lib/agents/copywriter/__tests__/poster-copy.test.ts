@@ -30,7 +30,7 @@ describe("poster copy contract", () => {
     }).success).toBe(false);
     expect(PosterCopySchema.safeParse({
       ...valid,
-      callToAction: "Tap the link in our bio to chat with us on WhatsApp",
+      callToAction: "Tap the link in our bio to chat with us on WhatsApp today",
     }).success).toBe(false);
   });
 
@@ -40,7 +40,7 @@ describe("poster copy contract", () => {
 
   it("asks for compression without inventing claims", () => {
     const prompt = buildPosterCopyPrompt("Tadika Tunas Intelek", "A long approved caption.");
-    expect(prompt).toContain("at most 6 words");
+    expect(prompt).toContain("at most 8 words");
     expect(prompt).toContain("Do not add a claim, price, date");
     expect(prompt).toContain("Never end a line with an ellipsis");
     expect(prompt).toContain("A long approved caption.");

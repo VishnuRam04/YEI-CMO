@@ -24,7 +24,7 @@ describe("brand judge", () => {
       styleFragment: "clean, structured, practical",
       logoSafeArea: "Leave breathing room around the wordmark",
     },
-  } as any;
+  };
 
   it("passes brand-aligned copy", () => {
     const report = evaluateBrandFitForContent(

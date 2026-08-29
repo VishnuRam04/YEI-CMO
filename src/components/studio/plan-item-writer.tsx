@@ -66,6 +66,7 @@ export function PlanItemWriter({
   const [image, setImage] = useState<ImageState>(null);
   const [imageStatus, setImageStatus] = useState<"idle" | "working">("idle");
   const [imageError, setImageError] = useState("");
+  const [posterAudit, setPosterAudit] = useState<BrandAuditReport | null>(null);
 
   async function write() {
     setTextStatus("working");
@@ -90,10 +91,16 @@ export function PlanItemWriter({
     if (!chosen) return;
     setImageStatus("working");
     setImageError("");
+    setPosterAudit(null);
     try {
       // The Copywriter compresses the chosen caption into poster wording, so
       // the artwork says the same thing in far fewer words.
-      const result = await runAgentRoute<{ kind: "image"; imageUrl: string; mimeType: string }>({
+      const result = await runAgentRoute<{
+        kind: "image";
+        imageUrl: string;
+        mimeType: string;
+        brandAudit?: BrandAuditReport[];
+      }>({
         brandId,
         payload: {
           mode: "image",
@@ -102,6 +109,7 @@ export function PlanItemWriter({
         },
       });
       setImage({ url: result.imageUrl, mimeType: result.mimeType });
+      setPosterAudit(result.brandAudit?.[0] ?? null);
     } catch (error) {
       setImageError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -274,6 +282,24 @@ export function PlanItemWriter({
               // eslint-disable-next-line @next/next/no-img-element
               <img src={image.url} alt="Generated campaign image" />
             )}
+          {posterAudit && (
+            <div className="writer-score-card" style={{ marginTop: 13 }}>
+              <div className="writer-score-header">
+                <span>Brand Judge · poster wording</span>
+                <b className={posterAudit.passed ? "pass" : "fail"}>
+                  {posterAudit.overallScore}/100
+                </b>
+              </div>
+              <div className="writer-score-grid">
+                {posterAudit.criteria.map((criterion) => (
+                  <div key={criterion.criterion} className="writer-score-row">
+                    <span>{criterion.criterion}</span>
+                    <b>{criterion.score}</b>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </section>

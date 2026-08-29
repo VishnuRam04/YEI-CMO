@@ -244,13 +244,13 @@ ${sourceText}
 
 A poster is read in about two seconds from a phone feed, so compress hard.
 
-headline      - the hook, at most 6 words. Punchy, concrete, no full stop.
-subheadline   - what the brand does for them, at most 9 words.
-highlights    - 2 or 3 phrases of at most 4 words each. Each names one concrete
+headline      - the hook, at most 8 words. Punchy, concrete, no full stop.
+subheadline   - what the brand does for them, at most 12 words.
+highlights    - 2 or 3 phrases of at most 5 words each. Each names one concrete
                 thing a child does or gets, so it can sit beside an icon.
                 Examples of the right shape: "Pours their own drink",
                 "Packs their own bag".
-callToAction  - the action, at most 5 words, starting with a verb.
+callToAction  - the action, at most 6 words, starting with a verb.
 
 RULES
 - Say only what the approved post says. Do not add a claim, price, date,

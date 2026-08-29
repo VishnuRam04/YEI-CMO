@@ -22,10 +22,7 @@ import {
   type TextGenerationPayload,
   type TextVariant,
 } from "./schema";
-import {
-  evaluateBrandFitForContent,
-  type BrandJudgeReport,
-} from "./brand-judge";
+import { evaluateBrandFitForContent } from "./brand-judge";
 import type { BrandAuditReport } from "./schema";
 
 type JsonRecord = Record<string, unknown>;
@@ -468,23 +465,44 @@ async function runImageGeneration(
       }
     : undefined;
   if (!posterCopy && payload.posterSource) {
-    try {
-      const written = await generateText({
-        model: model(MODELS.copywriter),
-        prompt: buildPosterCopyPrompt(memory.kernel.name, payload.posterSource),
-        output: Output.object({ schema: PosterCopySchema }),
-        maxOutputTokens: 600,
-        maxRetries: 1,
-        providerOptions: { google: { thinkingConfig: { thinkingLevel: "low" } } },
-      });
-      const copy = PosterCopySchema.parse(written.output);
-      posterCopy = {
-        headline: copy.headline,
-        supportingLines: [copy.subheadline],
-        callToAction: copy.callToAction,
-        highlights: copy.highlights,
-      };
-    } catch (error) {
+    // maxRetries does not cover a schema mismatch: the SDK treats
+    // NoObjectGeneratedError as terminal. Tight word limits make a first-pass
+    // miss common, so the attempts are made explicitly here.
+    const posterCopyAttempts = 3;
+    let lastFailure: unknown = null;
+    for (let attempt = 0; attempt < posterCopyAttempts && !posterCopy; attempt += 1) {
+      try {
+        const written = await generateText({
+          model: model(MODELS.copywriter),
+          prompt: buildPosterCopyPrompt(memory.kernel.name, payload.posterSource),
+          output: Output.object({ schema: PosterCopySchema }),
+          // Thinking tokens count against this budget, so 600 truncated the
+          // JSON mid-object and surfaced as a schema mismatch rather than as
+          // the token limit it actually was.
+          maxOutputTokens: 2_000,
+          maxRetries: 1,
+          providerOptions: { google: { thinkingConfig: { thinkingLevel: "low" } } },
+        });
+        const copy = PosterCopySchema.parse(written.output);
+        posterCopy = {
+          headline: copy.headline,
+          supportingLines: [copy.subheadline],
+          callToAction: copy.callToAction,
+          highlights: copy.highlights,
+        };
+      } catch (error) {
+        lastFailure = error;
+        // The SDK's message only says the schema did not match; the offending
+        // text and the failing rule are what actually identify the problem.
+        console.error(
+          `[copywriter] poster wording attempt ${attempt + 1} failed.`,
+          NoObjectGeneratedError.isInstance(error)
+            ? { text: error.text, cause: error.cause }
+            : error,
+        );
+      }
+    }
+    if (!posterCopy) {
       // Without poster copy the piece would be a wordless illustration, which
       // is not what was asked for, so the caller is told plainly.
       return agentFailure({
@@ -495,7 +513,50 @@ async function runImageGeneration(
         error: {
           code: "MODEL_ERROR",
           message: "The poster wording could not be written. Please retry.",
-          detail: error instanceof Error ? error.message : String(error),
+          detail: lastFailure instanceof Error ? lastFailure.message : String(lastFailure),
+          retryable: true,
+        },
+      });
+    }
+  }
+
+  // A poster is content the user sees, so its wording faces the same Brand
+  // Judge as a caption. Words baked into artwork cannot be edited afterwards,
+  // which makes reviewing them before rendering more important, not less.
+  let posterAudit: BrandAuditReport[] = [];
+  if (posterCopy) {
+    const posterText = [
+      posterCopy.headline,
+      ...posterCopy.supportingLines,
+      ...posterCopy.highlights,
+      posterCopy.callToAction,
+    ].filter(Boolean).join("\n");
+    const report = evaluateBrandFitForContent(memory, posterText, "instagram");
+    posterAudit = [{
+      angle: "poster",
+      passed: report.passed,
+      overallScore: report.overallScore,
+      criteria: report.criteria.map((criterion) => ({
+        criterion: criterion.criterion,
+        score: criterion.score,
+        passed: criterion.passed,
+        reasons: criterion.reasons,
+      })),
+      notes: report.notes,
+    }];
+    if (!report.passed) {
+      return agentFailure({
+        agentId: "copywriter",
+        traceId: input.traceId,
+        model: MODELS.copywriter,
+        summary: `Poster wording failed the Brand Judge - ${report.overallScore}/100`,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "The poster wording did not pass the Brand Judge. Please retry.",
+          detail: report.criteria
+            .filter((criterion) => !criterion.passed)
+            .map((criterion) => `${criterion.criterion}: ${criterion.reasons.join("; ")}`)
+            .join(" | ") || report.notes.join(" | "),
           retryable: true,
         },
       });
@@ -562,6 +623,7 @@ async function runImageGeneration(
       imageUrl: stored.url,
       mimeType: imageFile.mediaType,
       tier,
+      brandAudit: posterAudit,
     },
     summary: `1 image - ${tier} - ${stored.backend}`,
     inputTokens: generated.usage.inputTokens ?? 0,
