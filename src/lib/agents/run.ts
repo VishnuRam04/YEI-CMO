@@ -15,7 +15,8 @@ import type {
 const AGENT_TIMEOUT_MS: Record<AgentId, number> = {
   "cmo": 150_000,
   "brand-analyst": 110_000,
-  "copywriter": 30_000,
+  // Generation plus an independent Brand Judge call, up to three attempts.
+  "copywriter": 120_000,
   "analyst": 40_000,
   "strategist": 85_000,
   "brand-judge": 20_000,

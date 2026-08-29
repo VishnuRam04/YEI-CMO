@@ -22,7 +22,7 @@ import {
   type TextGenerationPayload,
   type TextVariant,
 } from "./schema";
-import { evaluateBrandFitForContent } from "./brand-judge";
+import { buildReport, reviewContent } from "./brand-judge";
 import type { BrandAuditReport } from "./schema";
 
 type JsonRecord = Record<string, unknown>;
@@ -262,6 +262,7 @@ async function runTextGeneration(
   let finalUsage = { inputTokens: 0, outputTokens: 0 };
   let finalAudit: BrandAuditReport[] = [];
   let promptForNextAttempt = buildUserPrompt(payload);
+  let lastReviewDetail = "";
 
   for (let attempt = 0; attempt < brandJudgeAttempts; attempt += 1) {
     const generation = streamText({
@@ -349,9 +350,16 @@ async function runTextGeneration(
       });
     }
 
+    // All three variants are judged in one call: the review is comparative and
+    // should not cost a round trip per variant.
+    const reports = await reviewContent(
+      memory,
+      variants.map((variant) => ({ id: variant.angle, content: persistedText(variant) })),
+      payload.channel,
+    );
     const reviews = variants.map((variant) => ({
       variant,
-      report: evaluateBrandFitForContent(memory, persistedText(variant), payload.channel),
+      report: reports.get(variant.angle) ?? buildReport([]),
     }));
     const failedReview = reviews.filter(({ report }) => !report.passed);
 
@@ -373,6 +381,13 @@ async function runTextGeneration(
       break;
     }
 
+    lastReviewDetail = failedReview
+      .map(({ variant, report }) => `${variant.angle} ${report.overallScore}/100: ` + report.criteria
+        .filter((criterion) => !criterion.passed)
+        .map((criterion) => `${criterion.criterion}=${criterion.score} (${criterion.reasons[0] ?? ""})`)
+        .join("; "))
+      .join(" | ");
+
     const correctionSummary = failedReview
       .map(({ variant, report }) => {
         const criteria = report.criteria.filter((criterion) => criterion.score < 75);
@@ -380,7 +395,7 @@ async function runTextGeneration(
       })
       .join("; ");
 
-    promptForNextAttempt = `${buildUserPrompt(payload)}\n\nBRAND REVIEW FEEDBACK\nRewrite the draft so that every criterion is at least 75 and the average score is at least 80. Fix these failures before returning:\n${correctionSummary}\n\nDo not repeat the rejected phrasing. Preserve the task brief but improve the copy to match the brand voice, palette, typography, claims safety, and channel constraints.`;
+    promptForNextAttempt = `${buildUserPrompt(payload)}\n\nBRAND REVIEW FEEDBACK\nRewrite the draft so that every criterion is at least 75 and the average score is at least 80. Fix these failures before returning:\n${correctionSummary}\n\nDo not repeat the rejected phrasing. Preserve the task brief but improve the copy so it is recognisably about this brand's offer, speaks to a confirmed customer, states only what the confirmed proof points support, and matches the approved tone and channel limits.`;
   }
 
   if (!finalVariants) {
@@ -392,6 +407,7 @@ async function runTextGeneration(
       error: {
         code: "VALIDATION_ERROR",
         message: "The generated copy failed the brand-fit gate after repeated revisions.",
+        detail: lastReviewDetail,
         retryable: true,
       },
     });
@@ -520,9 +536,9 @@ async function runImageGeneration(
     }
   }
 
-  // A poster is content the user sees, so its wording faces the same Brand
-  // Judge as a caption. Words baked into artwork cannot be edited afterwards,
-  // which makes reviewing them before rendering more important, not less.
+  // A poster is content the user sees, so its wording faces the same review as
+  // a caption. Words baked into artwork cannot be edited afterwards, which
+  // makes judging them before rendering more important, not less.
   let posterAudit: BrandAuditReport[] = [];
   if (posterCopy) {
     const posterText = [
@@ -531,7 +547,12 @@ async function runImageGeneration(
       ...posterCopy.highlights,
       posterCopy.callToAction,
     ].filter(Boolean).join("\n");
-    const report = evaluateBrandFitForContent(memory, posterText, "instagram");
+    const reports = await reviewContent(
+      memory,
+      [{ id: "poster", content: posterText }],
+      "instagram",
+    );
+    const report = reports.get("poster") ?? buildReport([]);
     posterAudit = [{
       angle: "poster",
       passed: report.passed,
