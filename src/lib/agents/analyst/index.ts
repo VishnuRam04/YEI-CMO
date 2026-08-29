@@ -178,7 +178,13 @@ export const analystAgent: Agent<AnalystPayload, AnalystResult> = {
     ]);
     const kernel = record(brand?.kernel);
     const performance = performanceFromMetrics(metrics, input.payload.from, input.payload.to);
-    const patterns = storedPatterns.map((pattern) => ({
+    const patterns = storedPatterns.map((pattern: {
+      dimension: string;
+      condition: string;
+      outcome: string;
+      lift: number;
+      n: number;
+    }) => ({
       dimension: pattern.dimension,
       condition: pattern.condition,
       outcome: pattern.outcome,

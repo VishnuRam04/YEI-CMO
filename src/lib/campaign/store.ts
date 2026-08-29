@@ -141,6 +141,6 @@ export async function loadLatestCampaign(
     orderBy: { updatedAt: "desc" },
     take: 5,
   });
-  const parsed = rows.map(parse).filter((row): row is StoredCampaign => row !== null);
-  return parsed.find((row) => row.status === "selected") ?? parsed[0] ?? null;
+  const parsed = rows.map((row) => parse(row)).filter((row): row is StoredCampaign => row !== null);
+  return parsed.find((row: StoredCampaign) => row.status === "selected") ?? parsed[0] ?? null;
 }

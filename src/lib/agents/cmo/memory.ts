@@ -49,7 +49,7 @@ export async function loadCmoContext(conversationId: string): Promise<string[]> 
     select: { role: true, text: true },
   });
 
-  return messages.reverse().map((message) => `${message.role}: ${message.text}`);
+  return messages.reverse().map((message: { role: string; text: string }) => `${message.role}: ${message.text}`);
 }
 
 export async function loadPendingClarification(
@@ -138,7 +138,15 @@ export async function loadCmoHistory(
 
   if (!conversation) return null;
 
-  return conversation.messages.flatMap((message) => {
+  return conversation.messages.flatMap((message: {
+    id: string;
+    role: string;
+    text: string;
+    presentation: string | null;
+    response: unknown;
+    delegations: unknown;
+    createdAt: Date;
+  }) => {
     if (message.role !== "user" && message.role !== "assistant") return [];
     const response = message.response
       ? CmoResponseSchema.safeParse(message.response)
