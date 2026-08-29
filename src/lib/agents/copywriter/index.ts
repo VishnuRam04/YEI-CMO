@@ -22,7 +22,7 @@ import {
   type TextGenerationPayload,
   type TextVariant,
 } from "./schema";
-import { buildReport, reviewContent } from "./brand-judge";
+import { buildReport, judgeRenderedPoster, reviewContent } from "./brand-judge";
 import type { BrandAuditReport } from "./schema";
 
 type JsonRecord = Record<string, unknown>;
@@ -551,6 +551,7 @@ async function runImageGeneration(
       memory,
       [{ id: "poster", content: posterText }],
       "instagram",
+      "poster",
     );
     const report = reports.get("poster") ?? buildReport([]);
     posterAudit = [{
@@ -623,6 +624,69 @@ async function runImageGeneration(
         retryable: true,
       },
     });
+  }
+
+  // The rendered poster is judged before it is stored or shown: palette, brand
+  // mark, motif and the accuracy of the words exist only in the pixels.
+  if (posterCopy) {
+    try {
+      const visual = await judgeRenderedPoster(
+        memory,
+        { bytes: imageFile.uint8Array, mediaType: imageFile.mediaType },
+        [
+          posterCopy.headline,
+          ...posterCopy.supportingLines,
+          ...posterCopy.highlights,
+          posterCopy.callToAction,
+        ].filter(Boolean),
+      );
+      const combined = buildReport([
+        ...(posterAudit[0]?.criteria ?? []).map((item) => ({
+          criterion: item.criterion as never,
+          score: item.score,
+          passed: item.passed,
+          reasons: item.reasons,
+        })),
+        ...visual,
+      ]);
+      posterAudit = [{
+        angle: "poster",
+        passed: combined.passed,
+        overallScore: combined.overallScore,
+        criteria: combined.criteria.map((item) => ({
+          criterion: item.criterion,
+          score: item.score,
+          passed: item.passed,
+          reasons: item.reasons,
+        })),
+        notes: combined.notes,
+      }];
+      if (!combined.passed) {
+        return agentFailure({
+          agentId: "copywriter",
+          traceId: input.traceId,
+          model: MODELS.copywriter,
+          summary: `Poster failed the Brand Judge - ${combined.overallScore}/100`,
+          error: {
+            code: "VALIDATION_ERROR",
+            message: "The finished poster did not pass the Brand Judge. Please retry.",
+            detail: combined.criteria
+              .filter((item) => !item.passed)
+              .map((item) => `${item.criterion}: ${item.reasons.join("; ")}`)
+              .join(" | "),
+            retryable: true,
+          },
+        });
+      }
+    } catch (error) {
+      // A visual review that cannot run must not silently become a pass.
+      console.error("[copywriter] visual review unavailable.", error);
+      posterAudit = posterAudit.map((audit) => ({
+        ...audit,
+        passed: false,
+        notes: [...audit.notes, "The finished poster was not visually reviewed."],
+      }));
+    }
   }
 
   // Storage picks a blob host when one is configured and the database

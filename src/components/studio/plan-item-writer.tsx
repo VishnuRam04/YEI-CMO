@@ -44,6 +44,48 @@ async function runAgentRoute<T>(body: unknown): Promise<T> {
   throw new Error(failure || "The Copywriter returned nothing to use.");
 }
 
+
+const criterionLabels: Record<string, string> = {
+  voice: "Voice",
+  claims: "Claim safety",
+  channel: "Channel fit",
+  positioning: "Positioning",
+  audience: "Audience",
+  proof: "Evidence",
+  tone: "Tone",
+  visual: "Brand look",
+  legibility: "Readability",
+  spelling: "Spelling",
+};
+
+function ScoreCard({ title, audit }: { title: string; audit: BrandAuditReport }) {
+  return (
+    <section className="score-card">
+      <header>
+        <span>{title}</span>
+        <b className={audit.passed ? "pass" : "fail"}>
+          {audit.overallScore}<small>/100</small>
+        </b>
+      </header>
+      <div className="score-list">
+        {audit.criteria.map((criterion) => (
+          <div
+            key={criterion.criterion}
+            className={`score-row ${criterion.passed ? "" : "failed"}`}
+          >
+            <div className="score-row-top">
+              <span>{criterionLabels[criterion.criterion] ?? criterion.criterion}</span>
+              <i><em style={{ width: `${criterion.score}%` }} /></i>
+              <b>{criterion.score}</b>
+            </div>
+            {criterion.reasons[0] && <p>{criterion.reasons[0]}</p>}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function PlanItemWriter({
   brandId,
   channel,
@@ -136,7 +178,6 @@ export function PlanItemWriter({
     ].filter(Boolean).join("\n\n");
   }
 
-  const selectedAudit = brandAudit.find((audit) => audit.angle === variants[selected]?.angle) ?? null;
 
   return (
     <section className="writer">
@@ -211,20 +252,7 @@ export function PlanItemWriter({
                 const audit = brandAudit.find((item) => item.angle === variant.angle);
                 if (!audit) return null;
                 return (
-                  <div className="writer-score-card" style={{ marginTop: 14 }}>
-                    <div className="writer-score-header">
-                      <strong>Brand fit</strong>
-                      <span>{audit.overallScore}/100</span>
-                    </div>
-                    <div className="writer-score-grid">
-                      {audit.criteria.map((criterion) => (
-                        <div key={criterion.criterion} className="writer-score-row">
-                          <span>{criterion.criterion}</span>
-                          <b>{criterion.score}</b>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                  <ScoreCard title="Brand judge" audit={audit} />
                 );
               })()}
               <div className="variant-actions">
@@ -250,26 +278,6 @@ export function PlanItemWriter({
         </div>
       )}
 
-      {selectedAudit && (
-        <div className="writer-brand-report" style={{ marginTop: 18 }}>
-          <div className="kernel-field-label">Brand judge</div>
-          <div className="writer-score-header">
-            <strong>{selectedAudit.angle}</strong>
-            <span>{selectedAudit.overallScore}/100</span>
-          </div>
-          <div className="writer-score-grid">
-            {selectedAudit.criteria.map((criterion) => (
-              <div key={criterion.criterion} className="writer-score-row">
-                <span>{criterion.criterion}</span>
-                <b>{criterion.score}</b>
-              </div>
-            ))}
-          </div>
-          <ul className="writer-score-notes">
-            {selectedAudit.notes.map((note) => <li key={note}>{note}</li>)}
-          </ul>
-        </div>
-      )}
 
       {(image || imageError) && (
         <div className="writer-image">
@@ -282,24 +290,7 @@ export function PlanItemWriter({
               // eslint-disable-next-line @next/next/no-img-element
               <img src={image.url} alt="Generated campaign image" />
             )}
-          {posterAudit && (
-            <div className="writer-score-card" style={{ marginTop: 13 }}>
-              <div className="writer-score-header">
-                <span>Brand Judge · poster wording</span>
-                <b className={posterAudit.passed ? "pass" : "fail"}>
-                  {posterAudit.overallScore}/100
-                </b>
-              </div>
-              <div className="writer-score-grid">
-                {posterAudit.criteria.map((criterion) => (
-                  <div key={criterion.criterion} className="writer-score-row">
-                    <span>{criterion.criterion}</span>
-                    <b>{criterion.score}</b>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          {posterAudit && <ScoreCard title="Brand judge · poster" audit={posterAudit} />}
         </div>
       )}
     </section>
