@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   findUnique: vi.fn(),
+  findCampaign: vi.fn(),
   generateText: vi.fn(),
   runAgent: vi.fn(),
   getOrCreateConversation: vi.fn(),
@@ -15,9 +16,12 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/lib/db", () => ({
   getDb: () => ({
     brand: { findUnique: mocks.findUnique },
-    // The pipeline records the built plan; storage itself is covered by the
-    // campaign store's own tests.
-    campaign: { upsert: mocks.campaignUpsert },
+    // The pipeline records the built plan and the critic reads it back;
+    // storage itself is covered by the campaign store's own tests.
+    campaign: {
+      upsert: mocks.campaignUpsert,
+      findFirst: mocks.findCampaign,
+    },
   }),
 }));
 
@@ -73,6 +77,7 @@ describe("CMO orchestrator", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.findUnique.mockResolvedValue(brand);
+    mocks.findCampaign.mockResolvedValue(null);
     mocks.runAgent.mockResolvedValue({ summary: "worker complete" });
     mocks.getOrCreateConversation.mockResolvedValue("conversation_1");
     mocks.loadContext.mockResolvedValue([]);
@@ -155,6 +160,64 @@ describe("CMO orchestrator", () => {
       "Build the campaign around our CMO-1 workspace",
       ["CMO-1", "Invented Product"],
     )).toEqual(["CMO-1"]);
+  });
+
+  it("routes an explicit pre-flight request to the Campaign Critic", async () => {
+    mocks.findCampaign.mockResolvedValue({
+      id: "campaign_1",
+      brandId: "brand_1",
+      name: "Launch campaign",
+      updatedAt: new Date("2026-08-28T00:00:00.000Z"),
+      definition: {
+        id: "campaign_1",
+        name: "Launch campaign",
+        startDate: "2026-09-01",
+        endDate: "2026-09-14",
+      },
+      assets: [],
+      reviews: [],
+    });
+    const recommendations = [1, 2, 3].map((rank) => ({
+      rank,
+      action: `Fix ${rank}`,
+      rationale: `Reason ${rank}`,
+      evidence: [],
+      expectedImpact: { low: null, high: null, unit: "not estimated", basis: "No history." },
+      effort: "low",
+      confidence: "high",
+      planItem: null,
+    }));
+    mocks.runAgent.mockResolvedValue({
+      ok: true,
+      summary: "Pre-flight · hold · 55/100",
+      result: {
+        mode: "preflight",
+        reviewId: "review_1",
+        campaignId: "campaign_1",
+        campaignName: "Launch campaign",
+        reviewedAt: "2026-08-28T00:00:00.000Z",
+        verdict: "hold",
+        readinessScore: 55,
+        executiveSummary: "Tracking must be fixed before launch.",
+        criteria: [
+          "alignment", "targeting", "offer", "creative-fit", "message-match", "tracking", "feasibility",
+        ].map((key) => ({ key, label: key, score: 55, weight: key === "feasibility" ? 10 : 15, finding: "Needs work.", evidenceIds: [] })),
+        issues: [],
+        blockingIssues: [],
+        recommendations,
+      },
+    });
+
+    const output = await cmoAgent.run({
+      ...input,
+      payload: { ...input.payload, message: "Review our latest campaign before launch" },
+    });
+
+    expect(output.ok).toBe(true);
+    expect(output.result?.intent).toBe("review-campaign");
+    expect(output.result?.delegations).toEqual(["campaign-critic"]);
+    expect(output.result?.response.title).toContain("Hold campaign");
+    expect(mocks.generateText).not.toHaveBeenCalled();
   });
 
   it("runs Analyst intelligence before the Strategist", async () => {

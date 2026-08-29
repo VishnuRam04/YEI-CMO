@@ -143,9 +143,10 @@ const nodes: Node[] = [
     position: { x: 430, y: 475 },
     data: {
       label: "Campaign Critic",
-      model: "Future agent",
-      task: "Idle · later phase",
+      model: "Gemini 3.1 Pro Preview",
+      task: "Ready for pre-flight and post-flight review",
       icon: "scale",
+      active: true,
     },
   },
 ];

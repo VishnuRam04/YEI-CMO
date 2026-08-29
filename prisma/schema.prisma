@@ -132,6 +132,23 @@ model Metric {
   @@index([brandId, date])
 }
 
+model Campaign {
+  id               String   @id @default(cuid())
+  brandId          String
+  conversationId   String?
+  strategyId       String   @unique
+  objective        String
+  selectedOptionId String
+  status           String   @default("proposed")
+  strategy         Json
+  executionPlan    Json
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  brand            Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+
+  @@index([brandId, createdAt])
+}
+
 model Pattern {
   id        String   @id @default(cuid())
   brandId   String

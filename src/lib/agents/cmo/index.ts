@@ -13,6 +13,16 @@ import {
   type BrandAnalystPayload,
   type InformationRequest,
 } from "@/lib/agents/brand-analyst/schema";
+import { campaignCriticAgent } from "@/lib/agents/campaign-critic";
+import {
+  CampaignCriticPayloadSchema,
+  CampaignCriticResultSchema,
+  type CampaignCriticPayload,
+} from "@/lib/agents/campaign-critic/schema";
+import {
+  campaignDefinitionFromRecord,
+  latestCampaignReview,
+} from "@/lib/agents/campaign-critic/storage";
 import { copywriterAgent } from "@/lib/agents/copywriter";
 import type { CopywriterPayload } from "@/lib/agents/copywriter/schema";
 import { strategistAgent } from "@/lib/agents/strategist";
@@ -54,7 +64,7 @@ import { emitCmoDevTrace } from "./dev-trace";
 const MAX_DELEGATIONS = 3;
 
 type WorkerHandoff = {
-  agentId: "brand-analyst" | "copywriter" | "analyst" | "strategist";
+  agentId: "brand-analyst" | "copywriter" | "analyst" | "strategist" | "campaign-critic";
   status: "completed" | "needs-input" | "failed";
   summary: string;
   informationRequests: InformationRequest[];
@@ -187,6 +197,7 @@ function strategyFailureResponseFromHandoffs(handoffs: WorkerHandoff[]): CmoResp
     options: [],
     recommendation: "",
     planOffer: false,
+    
     nextStep: "Please try again. If you are developing the app, the trace will show which step failed.",
   };
 }
@@ -201,6 +212,99 @@ export function explicitPlanRequest(message: string): boolean {
 export function agreesToPlanOffer(message: string): boolean {
   return /^(?:yes|yep|yeah|yup|ok|okay|sure|please|go ahead|do it|go for it|sounds good|let'?s do it|build it|make it|create it|proceed)\b/i
     .test(message.trim());
+}
+
+function campaignResponseFromHandoffs(handoffs: WorkerHandoff[]): CmoResponse | null {
+  const handoff = handoffs.find((candidate) => candidate.agentId === "campaign-critic");
+  if (handoff?.status === "failed") {
+    return {
+      title: "Campaign review needs input",
+      executiveSummary: handoff.summary,
+      keyPoints: [],
+      options: [],
+      recommendation: "",
+      planOffer: false,
+      nextStep: "Open Campaign Review, save the campaign details, and retry.",
+    };
+  }
+  const parsed = CampaignCriticResultSchema.safeParse(handoff?.detail);
+  if (!parsed.success) return null;
+  const review = parsed.data;
+  if (review.mode === "preflight") {
+    const verdict = review.verdict === "ready"
+      ? "strong" as const
+      : review.verdict === "revise"
+        ? "needs-work" as const
+        : "not-recommended" as const;
+    return {
+      title: review.verdict === "ready"
+        ? `Ready to launch · ${review.readinessScore}/100`
+        : review.verdict === "revise"
+          ? `Revise before launch · ${review.readinessScore}/100`
+          : `Hold campaign · ${review.readinessScore}/100`,
+      executiveSummary: review.executiveSummary,
+      verdict,
+      keyPoints: review.issues.slice(0, 3).map((issue) => `${issue.severity}: ${issue.finding}`),
+      options: [],
+      recommendation: "",
+      planOffer: false,
+      nextStep: review.recommendations[0].action,
+    };
+  }
+  const verdict = review.outcome === "met"
+    ? "strong" as const
+    : review.outcome === "partially-met"
+      ? "promising" as const
+      : review.outcome === "missed"
+        ? "needs-work" as const
+        : "needs-work" as const;
+  return {
+    title: `Campaign outcome · ${review.outcome.replace("-", " ")}`,
+    executiveSummary: review.executiveSummary,
+    verdict,
+    keyPoints: review.diagnosis.slice(0, 3),
+    options: [],
+    recommendation: "",
+    planOffer: false,
+    nextStep: review.recommendations[0].action,
+  };
+}
+
+function deterministicCampaignReviewDecision(message: string): CmoDecision | null {
+  const explicitReview = /\b(?:review|audit|critique|critic|readiness check|pre[ -]?flight|post[ -]?flight|assess)\b/i.test(message) &&
+    /\bcampaign\b/i.test(message);
+  if (!explicitReview) return null;
+  const reviewMode = /\b(?:post[ -]?flight|results?|performance|after launch|completed|ended)\b/i.test(message)
+    ? "postflight" as const
+    : "preflight" as const;
+  const campaignId = message.match(/\bcampaign(?:\s+id)?\s*[:#]\s*([a-zA-Z0-9_-]{8,160})\b/i)?.[1] ?? "";
+  return CmoDecisionSchema.parse({
+    intent: "review-campaign",
+    response: {
+      title: reviewMode === "preflight" ? "Campaign review in progress" : "Campaign results review in progress",
+      executiveSummary: reviewMode === "preflight"
+        ? "I’m checking the latest saved campaign for launch blockers."
+        : "I’m comparing the latest saved campaign results with its original hypothesis.",
+      keyPoints: [],
+      options: [],
+      recommendation: "",
+      planOffer: false,
+      nextStep: "Review the Campaign Critic verdict and highest-priority action.",
+    },
+    delegations: [{
+      agentId: "campaign-critic",
+      instruction: message,
+      url: "",
+      channel: "none",
+      from: "",
+      to: "",
+      products: [],
+      topics: [],
+      horizon: "sprint",
+      campaignId,
+      reviewMode,
+    }],
+  });
 }
 
 function deterministicStrategyDecision(message: string): CmoDecision | null {
@@ -220,6 +324,7 @@ function deterministicStrategyDecision(message: string): CmoDecision | null {
       keyPoints: [],
       options: [],
       recommendation: "",
+      planOffer: false,
       nextStep: "Review the proposed sprint before content production begins.",
     },
     delegations: [{
@@ -582,6 +687,65 @@ async function delegate(
     return basicHandoff("strategist", "failed", "Strategy pipeline was not initialized.");
   }
 
+  if (plan.agentId === "campaign-critic") {
+    const db = getDb();
+    const campaign = await db.campaign.findFirst({
+      where: {
+        brandId: input.brandId,
+        ...(plan.campaignId ? { id: plan.campaignId } : {}),
+      },
+      orderBy: { updatedAt: "desc" },
+    });
+    if (!campaign) {
+      return basicHandoff("campaign-critic", "failed", "No saved campaign is available to review.");
+    }
+    const definition = campaignDefinitionFromRecord(campaign);
+    const previousReview = latestCampaignReview(campaign.executionPlan, "preflight");
+    const previous = CampaignCriticPayloadSchema.safeParse(previousReview?.inputSnapshot);
+    const assets = previous.success && previous.data.mode === "preflight"
+      ? previous.data.assets
+      : [];
+    if (plan.reviewMode === "postflight" && !latestCampaignReview(campaign.executionPlan, "postflight")) {
+      return basicHandoff(
+        "campaign-critic",
+        "failed",
+        "No result data is stored for this campaign. Import metrics in Campaign Review first.",
+      );
+    }
+    const payload: CampaignCriticPayload = plan.reviewMode === "postflight"
+      ? { mode: "postflight", campaignId: campaign.id, metrics: [], analystFindings: [], notes: plan.instruction }
+      : { mode: "preflight", campaign: definition, assets, notes: plan.instruction };
+    emitCmoDevTrace(input.traceId, {
+      agentId: "campaign-critic",
+      stage: plan.reviewMode,
+      label: plan.reviewMode === "preflight" ? "Checking campaign readiness before spend" : "Comparing campaign results with the hypothesis",
+      status: "working",
+      detail: { campaignId: campaign.id, mode: plan.reviewMode },
+    });
+    const output = await runAgent(campaignCriticAgent, {
+      ...input,
+      traceId: `${input.traceId}-critic`,
+      payload,
+    });
+    emitCmoDevTrace(input.traceId, {
+      agentId: "campaign-critic",
+      stage: plan.reviewMode,
+      label: output.ok ? "Campaign Critic verdict ready" : "Campaign Critic could not complete the review",
+      status: output.ok ? "completed" : "failed",
+      detail: output.ok
+        ? { summary: output.summary, output: output.result }
+        : { summary: output.summary, error: output.error },
+    });
+    return {
+      ...basicHandoff(
+        "campaign-critic",
+        output.ok ? "completed" : "failed",
+        output.ok ? output.summary : output.error?.message ?? output.summary,
+      ),
+      detail: output.result,
+    };
+  }
+
   const payload: AnalystPayload = dateRange(plan);
   emitCmoDevTrace(input.traceId, {
     agentId: "analyst",
@@ -814,7 +978,8 @@ export const cmoAgent: Agent<CmoPayload, CmoResult> = {
       });
       const deterministicDecision = pendingClarification
         ? null
-        : deterministicStrategyDecision(effectiveMessage);
+        : deterministicCampaignReviewDecision(effectiveMessage) ??
+          deterministicStrategyDecision(effectiveMessage);
       const decisionCall = deterministicDecision
         ? null
         : await generateText({
@@ -891,6 +1056,8 @@ export const cmoAgent: Agent<CmoPayload, CmoResult> = {
           response = strategyResponse;
         } else if (hasStrategy) {
           response = strategyFailureResponseFromHandoffs(workerHandoffs) ?? response;
+        } else if (decision.intent === "review-campaign") {
+          response = campaignResponseFromHandoffs(workerHandoffs) ?? response;
         } else {
           emitCmoDevTrace(input.traceId, {
             agentId: "cmo",

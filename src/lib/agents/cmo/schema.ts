@@ -134,19 +134,19 @@ export const CmoResultSchema = z.object({
   response: CmoResponseSchema,
   conversationId: z.string().min(1),
   presentation: z.enum(["conversation", "brief"]),
-  intent: z.enum(["chat", "extract", "generate", "analyse", "strategize", "clarify"]),
+  intent: z.enum(["chat", "extract", "generate", "analyse", "strategize", "review-campaign", "clarify"]),
   delegations: z
-    .array(z.enum(["brand-analyst", "copywriter", "analyst", "strategist"]))
+    .array(z.enum(["brand-analyst", "copywriter", "analyst", "strategist", "campaign-critic"]))
     .max(3),
 });
 
 export const CmoDecisionSchema = z.object({
-  intent: z.enum(["chat", "extract", "generate", "analyse", "strategize", "clarify"]),
+  intent: z.enum(["chat", "extract", "generate", "analyse", "strategize", "review-campaign", "clarify"]),
   response: CmoModelResponseSchema,
   delegations: z
     .array(
       z.object({
-        agentId: z.enum(["brand-analyst", "copywriter", "analyst", "strategist"]),
+        agentId: z.enum(["brand-analyst", "copywriter", "analyst", "strategist", "campaign-critic"]),
         instruction: z.string().min(1),
         url: z.string(),
         channel: z.enum(["linkedin", "instagram", "email", "none"]),
@@ -155,6 +155,8 @@ export const CmoDecisionSchema = z.object({
         products: z.array(z.string().trim().min(1).max(200)).max(50).default([]),
         topics: z.array(z.string().trim().min(1).max(200)).max(12).default([]),
         horizon: z.enum(["sprint", "quarter"]).default("sprint"),
+        campaignId: z.string().trim().max(160).default(""),
+        reviewMode: z.enum(["preflight", "postflight"]).default("preflight"),
       }),
     )
     .max(10),

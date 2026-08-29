@@ -34,7 +34,7 @@ type DevTraceEvent = {
   type: "trace";
   id: string;
   traceId: string;
-  agentId: "cmo" | "brand-analyst" | "analyst" | "strategist" | "copywriter";
+  agentId: "cmo" | "brand-analyst" | "analyst" | "strategist" | "copywriter" | "campaign-critic";
   stage: string;
   label: string;
   status: DevTraceStatus;
@@ -47,6 +47,7 @@ const suggestions = [
   "Explain our positioning",
   "Write a LinkedIn launch post",
   "What should we focus on next?",
+  "Review our latest campaign before launch",
 ];
 
 function newMessage(
@@ -87,6 +88,7 @@ function agentName(agentId: DevTraceEvent["agentId"]): string {
     analyst: "Analyst",
     strategist: "Strategist",
     copywriter: "Copywriter",
+    "campaign-critic": "Campaign Critic",
   }[agentId];
 }
 
