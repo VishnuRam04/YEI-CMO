@@ -70,7 +70,8 @@ describe("Strategist contracts and prompts", () => {
     expect(system).toContain("Exact product catalogue facts");
     expect(system).toContain("cannot override factual");
     expect(system).toContain("exactly three materially different options");
-    expect(prompt).toContain("exactly three concise strategic experiments");
+    expect(system).toContain("busy small-business owner");
+    expect(prompt).toContain("exactly three concise choices written in everyday language");
     expect(prompt).toContain("CMO Workspace");
     expect(prompt).toContain("Prioritise qualified pipeline");
     expect(evidenceIds(intelligence)).toContain("performance:linkedin:CTR");

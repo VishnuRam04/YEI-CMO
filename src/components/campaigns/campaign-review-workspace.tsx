@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import type {
   CampaignCriticResult,
+  CampaignDefinition,
   CampaignMetricSnapshot,
 } from "@/lib/agents/campaign-critic/schema";
 
@@ -22,6 +23,7 @@ type CampaignSummary = {
   name: string;
   startDate: string;
   endDate: string;
+  definition: CampaignDefinition;
 };
 
 type MetricDraft = {
@@ -39,6 +41,14 @@ type MetricDraft = {
 
 type Mode = "preflight" | "postflight";
 type RunStatus = "idle" | "queued" | "working";
+
+const CHANNEL_OPTIONS = [
+  ["linkedin", "LinkedIn"],
+  ["instagram", "Instagram"],
+  ["email", "Email"],
+  ["meta", "Meta"],
+  ["google-ads", "Google Ads"],
+] as const;
 
 function dateInput(offsetDays = 0): string {
   const date = new Date();
@@ -75,6 +85,43 @@ function verdictClass(value: string): string {
   if (["ready", "met"].includes(value)) return "tag-lime";
   if (["revise", "partially-met"].includes(value)) return "tag-orange";
   return "tag-red";
+}
+
+function campaignForm(brandName: string, definition?: CampaignDefinition) {
+  const audience = definition?.audiences[0];
+  return {
+    name: definition?.name ?? `${brandName} campaign`,
+    objective: definition?.objective ?? "",
+    hypothesis: definition?.hypothesis ?? "",
+    offerName: definition?.offer.name ?? "",
+    valueProposition: definition?.offer.valueProposition ?? "",
+    callToAction: definition?.offer.callToAction ?? "",
+    proofPoint: definition?.offer.proofPoints[0] ?? "",
+    audienceName: audience?.name ?? "",
+    audienceNeed: audience?.need ?? "",
+    targeting: audience?.targeting ?? "",
+    channel: definition?.channels[0] ?? "linkedin",
+    budget: String(definition?.budget.amount ?? 1_000),
+    currency: definition?.budget.currency ?? "MYR",
+    startDate: definition?.startDate ?? dateInput(1),
+    endDate: definition?.endDate ?? dateInput(14),
+    primaryKpi: definition?.primaryKpi || "Cost per lead",
+    targetValue: definition
+      ? definition.targetValue === undefined ? "" : String(definition.targetValue)
+      : "80",
+    targetUnit: definition?.targetUnit || (definition ? "results" : "MYR"),
+    landingPageUrl: definition?.landingPage.url ?? "",
+    landingHeadline: definition?.landingPage.headline ?? "",
+    landingCallToAction: definition?.landingPage.callToAction ?? "",
+    analyticsConfigured: definition?.tracking.analyticsConfigured ?? false,
+    pixelConfigured: definition?.tracking.pixelConfigured ?? false,
+    conversionEvent: definition?.tracking.conversionEvent ?? "",
+    utmPlan: definition?.tracking.utmPlan ?? "",
+    assetFormat: "post",
+    assetMessage: "",
+    brandScore: "",
+    notes: "",
+  };
 }
 
 async function agentRequest(payload: unknown, brandId: string): Promise<CampaignCriticResult> {
@@ -131,40 +178,10 @@ export function CampaignReviewWorkspace({
   const [result, setResult] = useState<CampaignCriticResult | null>(initialResult);
   const [campaigns, setCampaigns] = useState(initialCampaigns);
   const [selectedCampaignId, setSelectedCampaignId] = useState(initialCampaigns[0]?.id ?? "");
-  const [draftCampaignId, setDraftCampaignId] = useState("");
+  const [draftCampaignId, setDraftCampaignId] = useState(initialCampaigns[0]?.id ?? "");
   const [addedRanks, setAddedRanks] = useState<number[]>([]);
   const [metrics, setMetrics] = useState<MetricDraft[]>([metricDraft()]);
-  const [form, setForm] = useState({
-    name: `${brandName} campaign`,
-    objective: "",
-    hypothesis: "",
-    offerName: "",
-    valueProposition: "",
-    callToAction: "",
-    proofPoint: "",
-    audienceName: "",
-    audienceNeed: "",
-    targeting: "",
-    channel: "linkedin",
-    budget: "1000",
-    currency: "MYR",
-    startDate: dateInput(1),
-    endDate: dateInput(14),
-    primaryKpi: "Cost per lead",
-    targetValue: "80",
-    targetUnit: "MYR",
-    landingPageUrl: "",
-    landingHeadline: "",
-    landingCallToAction: "",
-    analyticsConfigured: false,
-    pixelConfigured: false,
-    conversionEvent: "",
-    utmPlan: "",
-    assetFormat: "post",
-    assetMessage: "",
-    brandScore: "",
-    notes: "",
-  });
+  const [form, setForm] = useState(() => campaignForm(brandName, initialCampaigns[0]?.definition));
 
   const canReviewPostflight = campaigns.length > 0 && selectedCampaignId.length > 0;
   const resultLabel = result?.mode === "preflight" ? result.verdict : result?.outcome;
@@ -176,6 +193,12 @@ export function CampaignReviewWorkspace({
   const update = (field: keyof typeof form, value: string | boolean) =>
     setForm((current) => ({ ...current, [field]: value }));
 
+  const selectDraftCampaign = (campaignId: string) => {
+    setDraftCampaignId(campaignId);
+    const selected = campaigns.find((campaign) => campaign.id === campaignId);
+    setForm(campaignForm(brandName, selected?.definition));
+  };
+
   async function runReview(event: FormEvent) {
     event.preventDefault();
     setError("");
@@ -183,48 +206,50 @@ export function CampaignReviewWorkspace({
     setStatus("queued");
     try {
       let payload: unknown;
+      let submittedCampaign: CampaignDefinition | null = null;
       if (mode === "preflight") {
         const amount = number(form.budget);
+        submittedCampaign = {
+          ...(draftCampaignId ? { id: draftCampaignId } : {}),
+          name: form.name,
+          objective: form.objective,
+          hypothesis: form.hypothesis,
+          offer: {
+            name: form.offerName,
+            valueProposition: form.valueProposition,
+            callToAction: form.callToAction,
+            proofPoints: form.proofPoint.trim() ? [form.proofPoint.trim()] : [],
+          },
+          audiences: form.audienceName.trim()
+            ? [{ name: form.audienceName, need: form.audienceNeed, targeting: form.targeting }]
+            : [],
+          channels: form.channel.trim() ? [form.channel] : [],
+          budget: {
+            amount,
+            currency: form.currency,
+            allocations: amount > 0 && form.channel ? [{ channel: form.channel, amount }] : [],
+          },
+          startDate: form.startDate,
+          endDate: form.endDate,
+          primaryKpi: form.primaryKpi,
+          ...(form.targetValue.trim() ? { targetValue: number(form.targetValue) } : {}),
+          targetUnit: form.targetUnit,
+          landingPage: {
+            ...(form.landingPageUrl.trim() ? { url: form.landingPageUrl.trim() } : {}),
+            headline: form.landingHeadline,
+            offer: form.valueProposition,
+            callToAction: form.landingCallToAction,
+          },
+          tracking: {
+            analyticsConfigured: form.analyticsConfigured,
+            pixelConfigured: form.pixelConfigured,
+            conversionEvent: form.conversionEvent,
+            utmPlan: form.utmPlan,
+          },
+        };
         payload = {
           mode: "preflight",
-          campaign: {
-            id: draftCampaignId || undefined,
-            name: form.name,
-            objective: form.objective,
-            hypothesis: form.hypothesis,
-            offer: {
-              name: form.offerName,
-              valueProposition: form.valueProposition,
-              callToAction: form.callToAction,
-              proofPoints: form.proofPoint.trim() ? [form.proofPoint.trim()] : [],
-            },
-            audiences: form.audienceName.trim()
-              ? [{ name: form.audienceName, need: form.audienceNeed, targeting: form.targeting }]
-              : [],
-            channels: form.channel.trim() ? [form.channel] : [],
-            budget: {
-              amount,
-              currency: form.currency,
-              allocations: amount > 0 && form.channel ? [{ channel: form.channel, amount }] : [],
-            },
-            startDate: form.startDate,
-            endDate: form.endDate,
-            primaryKpi: form.primaryKpi,
-            targetValue: form.targetValue.trim() ? number(form.targetValue) : undefined,
-            targetUnit: form.targetUnit,
-            landingPage: {
-              ...(form.landingPageUrl.trim() ? { url: form.landingPageUrl.trim() } : {}),
-              headline: form.landingHeadline,
-              offer: form.valueProposition,
-              callToAction: form.landingCallToAction,
-            },
-            tracking: {
-              analyticsConfigured: form.analyticsConfigured,
-              pixelConfigured: form.pixelConfigured,
-              conversionEvent: form.conversionEvent,
-              utmPlan: form.utmPlan,
-            },
-          },
+          campaign: submittedCampaign,
           assets: form.assetMessage.trim()
             ? [{
                 id: "representative-asset",
@@ -271,6 +296,7 @@ export function CampaignReviewWorkspace({
             name: review.campaignName,
             startDate: form.startDate,
             endDate: form.endDate,
+            definition: { ...submittedCampaign!, id: review.campaignId },
           };
           return [next, ...current.filter((campaign) => campaign.id !== next.id)];
         });
@@ -315,6 +341,7 @@ export function CampaignReviewWorkspace({
       {mode === "preflight" ? <>
         <section className="campaign-form-section">
           <div className="campaign-section-title"><span>01</span><h2>Campaign intent</h2></div>
+          <label><span>Campaign source</span><select value={draftCampaignId} onChange={(event) => selectDraftCampaign(event.target.value)}><option value="">New manual campaign</option>{campaigns.map((campaign) => <option key={campaign.id} value={campaign.id}>{campaign.name}</option>)}</select></label>
           <div className="campaign-field-grid two">
             <label><span>Name</span><input value={form.name} onChange={(event) => update("name", event.target.value)} required /></label>
             <label><span>Primary KPI</span><input value={form.primaryKpi} onChange={(event) => update("primaryKpi", event.target.value)} /></label>
@@ -341,7 +368,7 @@ export function CampaignReviewWorkspace({
         <section className="campaign-form-section">
           <div className="campaign-section-title"><span>03</span><h2>Spend and timing</h2></div>
           <div className="campaign-field-grid four">
-            <label><span>Channel</span><select value={form.channel} onChange={(event) => update("channel", event.target.value)}><option value="linkedin">LinkedIn</option><option value="instagram">Instagram</option><option value="email">Email</option><option value="meta">Meta</option><option value="google-ads">Google Ads</option></select></label>
+            <label><span>Channel</span><select value={form.channel} onChange={(event) => update("channel", event.target.value)}>{form.channel && !CHANNEL_OPTIONS.some(([value]) => value === form.channel) && <option value={form.channel}>{form.channel}</option>}{CHANNEL_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
             <label><span>Budget</span><input type="number" min="0" value={form.budget} onChange={(event) => update("budget", event.target.value)} /></label>
             <label><span>Currency</span><input value={form.currency} onChange={(event) => update("currency", event.target.value.toUpperCase())} /></label>
             <label><span>Target</span><input type="number" min="0" value={form.targetValue} onChange={(event) => update("targetValue", event.target.value)} /></label>

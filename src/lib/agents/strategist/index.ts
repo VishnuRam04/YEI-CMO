@@ -99,6 +99,7 @@ export const strategistAgent: Agent<StrategistPayload, StrategistResult> = {
     let inputTokens = 0;
     let outputTokens = 0;
     let usedFallback = false;
+    let fallbackReason = "";
     let strategy;
     try {
       const call = await generateText({
@@ -106,18 +107,31 @@ export const strategistAgent: Agent<StrategistPayload, StrategistResult> = {
         system: buildStrategistSystemPrompt(memory),
         prompt: buildStrategistPrompt({ payload: input.payload, memory }),
         output: Output.object({ schema: StrategistModelResultSchema }),
-        maxOutputTokens: 1_800,
-        maxRetries: 1,
-        // Current public evidence gets the larger share of the CMO's fixed
-        // interactive budget. A deterministic evidence-aware plan takes over
-        // if structured strategy generation cannot finish promptly.
-        timeout: { totalMs: 3_000 },
+        // The schema requires exactly three experiments of sixteen fields
+        // each, plus thesis, pillars, assumptions, risks and triggers. A
+        // measured minimal response is ~1,800 output tokens, so the previous
+        // 1_800 cap truncated the JSON, failed Output.object, and burned the
+        // retry re-running a call that could never fit.
+        maxOutputTokens: 4_000,
+        // One retry of a call this slow doubles the worst case, and a
+        // deterministic evidence-aware plan already covers failure.
+        maxRetries: 0,
+        // Measured latency is 25-56s: the prompt carries full Brand Memory
+        // plus the Analyst snapshot and its cited sources.
+        timeout: { totalMs: 75_000 },
         providerOptions: { google: { thinkingConfig: { thinkingLevel: "low" } } },
       });
       strategy = StrategistModelResultSchema.parse(call.output);
       inputTokens = call.usage.inputTokens ?? 0;
       outputTokens = call.usage.outputTokens ?? 0;
-    } catch {
+    } catch (error) {
+      // Falling back silently hides provider timeouts and schema drift behind
+      // plausible-looking output, so the cause is always recorded.
+      fallbackReason = error instanceof Error ? error.message : String(error);
+      console.error(
+        `[strategist] structured generation failed for trace ${input.traceId}; using fallback plan.`,
+        error,
+      );
       usedFallback = true;
       strategy = buildFallbackStrategy({
         objective: input.payload.objective,
@@ -140,7 +154,10 @@ export const strategistAgent: Agent<StrategistPayload, StrategistResult> = {
     const executionPlan = buildExecutionPlan({
       objective: input.payload.objective,
       strategy: { ...strategy, recommendedExperimentId },
-      intelligence: input.payload.intelligence,
+      evidence: {
+        hasOwnedPerformance: input.payload.intelligence.performanceSignals.length > 0,
+        hasMarketEvidence: input.payload.intelligence.marketSignals.length > 0,
+      },
       createdAt,
     });
     const result = StrategistResultSchema.parse({
@@ -171,7 +188,7 @@ export const strategistAgent: Agent<StrategistPayload, StrategistResult> = {
       traceId: input.traceId,
       model: MODELS.cmo,
       result,
-      summary: `${usedFallback ? "Fallback plan" : "Strategy ready"} · ${result.experiments.length} options · ${result.executionPlan.totalAssets} assets`,
+      summary: `${usedFallback ? `Fallback plan (${fallbackReason || "generation failed"})` : "Strategy ready"} · ${result.experiments.length} options · ${result.executionPlan.totalAssets} assets`,
       inputTokens,
       outputTokens,
     });

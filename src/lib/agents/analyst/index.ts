@@ -28,6 +28,17 @@ function round(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
+/**
+ * Schema-bound text. Provider output and provider error strings are both
+ * unbounded, so anything routed into a capped field is clamped here. Without
+ * this a long-but-valid research response, or a verbose timeout message,
+ * fails AnalystResultSchema and turns a degraded snapshot into a dead agent.
+ */
+function clamp(value: string, maximum: number): string {
+  const trimmed = value.trim();
+  return trimmed.length <= maximum ? trimmed : trimmed.slice(0, maximum).trim();
+}
+
 function performanceFromMetrics(
   metrics: Array<{
     channel: string;
@@ -106,7 +117,7 @@ function sourceRows(sources: unknown[], retrievedAt: string): AnalystResult["sou
     seen.add(url);
     return [{
       id: text(source.id, `research-${index + 1}`),
-      title: text(source.title, new URL(url).hostname),
+      title: clamp(text(source.title, new URL(url).hostname), 500),
       url,
       publishedAt: null,
       retrievedAt,
@@ -205,6 +216,10 @@ export const analystAgent: Agent<AnalystPayload, AnalystResult> = {
             brandName: brand?.name ?? "Unknown brand",
             category: text(kernel.category, "Unknown category"),
             positioning: text(kernel.positioning, "No confirmed positioning"),
+            competitors: Array.isArray(kernel.competitors)
+              ? kernel.competitors.filter((item): item is string =>
+                  typeof item === "string" && item.trim().length > 0).slice(0, 20)
+              : [],
             performanceSignals: performance.signals,
             sourceTargets: researchGroundingTargets(),
             now: generatedAt,
@@ -212,11 +227,16 @@ export const analystAgent: Agent<AnalystPayload, AnalystResult> = {
           // The installed AI SDK packages carry different provider-utils patch types;
           // the provider-executed tool is runtime-compatible despite that type skew.
           tools: { google_search: google.tools.googleSearch({}) as never },
-          maxOutputTokens: 1_200,
+          // Grounded search spends part of this budget on tool calls and
+          // thinking before emitting any answer text. At 1_200 the response
+          // hit MAX_TOKENS with zero characters of text, which silently
+          // produced an uncited snapshot on every run.
+          maxOutputTokens: 3_000,
           maxRetries: 1,
-          // Strategy requests share a 20s interactive CMO budget. Public
-          // research is best-effort and must leave room for the Strategist.
-          timeout: { totalMs: 12_000 },
+          // Measured latency for this prompt (four investigations plus
+          // competitor lookups) is 20-26s across runs; the budget clears the
+          // slow tail rather than the median.
+          timeout: { totalMs: 32_000 },
           providerOptions: { google: { thinkingConfig: { thinkingLevel: "low" } } },
         });
       const [connectorOutcome, groundedOutcome] = await Promise.allSettled([
@@ -306,9 +326,9 @@ export const analystAgent: Agent<AnalystPayload, AnalystResult> = {
       patterns,
       opportunities,
       risks,
-      missingData,
+      missingData: missingData.map((item) => clamp(item, 800)).slice(0, 20),
       sources,
-      digest: digestParts.join(" "),
+      digest: clamp(digestParts.join(" "), 5_000),
     });
 
     return agentSuccess({

@@ -64,7 +64,7 @@ describe("Campaign Critic storage adapter", () => {
     expect(adapted.name).toBe("Graduate outcomes sprint");
     expect(adapted.hypothesis).toBe("Proof will increase applications.");
     expect(adapted.audiences[0].name).toBe("Final-year students");
-    expect(adapted.channels).toEqual(["email", "instagram"]);
+    expect(adapted.channels).toEqual(["instagram", "email"]);
     expect(adapted.tracking.analyticsConfigured).toBe(false);
   });
 });

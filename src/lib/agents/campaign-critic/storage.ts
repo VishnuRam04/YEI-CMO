@@ -151,9 +151,9 @@ export function campaignDefinitionFromRecord(record: CampaignRecord): CampaignDe
   const channelRoles = Array.isArray(strategy.channelRoles) ? strategy.channelRoles.map(objectValue) : [];
   const schedule = Array.isArray(executionPlan.schedule) ? executionPlan.schedule.map(objectValue) : [];
   const channels = [...new Set([
-    ...channelRoles.map((role) => textValue(role.channel)),
-    ...schedule.map((item) => textValue(item.channel)),
     textValue(selected.channel),
+    ...schedule.map((item) => textValue(item.channel)),
+    ...channelRoles.map((role) => textValue(role.channel)),
   ].filter(Boolean))];
   const audiences = Array.isArray(strategy.targetAudiences)
     ? strategy.targetAudiences.flatMap((audience) => {
@@ -184,7 +184,7 @@ export function campaignDefinitionFromRecord(record: CampaignRecord): CampaignDe
     endDate: dateValue(executionPlan.endDate, fallbackEnd),
     primaryKpi: textValue(measurement.primaryMetric, selected.primaryMetric),
     targetValue: numberValue(measurement.targetValue),
-    targetUnit: textValue(measurement.targetUnit, measurement.primaryMetric, "result"),
+    targetUnit: textValue(measurement.targetUnit, "results"),
     landingPage: {
       url: typeof landingPage.url === "string" ? landingPage.url : undefined,
       headline: textValue(landingPage.headline),

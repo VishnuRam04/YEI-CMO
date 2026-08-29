@@ -33,6 +33,7 @@ export function buildResearchPrompt(options: {
   brandName: string;
   category: string;
   positioning: string;
+  competitors: string[];
   performanceSignals: PerformanceSignal[];
   sourceTargets: string[];
   now: string;
@@ -45,6 +46,7 @@ BRAND CONTEXT
     name: options.brandName,
     category: options.category,
     positioning: options.positioning,
+    confirmedCompetitors: options.competitors,
     products: options.payload.productNames,
   })}</brand_context>
 
@@ -59,7 +61,7 @@ OWNED PERFORMANCE
 OFFICIAL SOURCE LANES
 <source_targets>${JSON.stringify(options.sourceTargets)}</source_targets>
 
-Search for recent, decision-relevant developments. Check the supplied official source lanes when relevant, then use primary research, official platform publications, reputable industry data, and directly dated sources.
+Search for recent, decision-relevant developments. When confirmed competitor names are supplied, inspect their public websites, public social pages, visible offers and public ads where accessible. Do not assume those competitors are still active or relevant without current evidence. When no competitor is confirmed, research visible category competitors and label them as discovered examples, not Brand Memory. Check the supplied official source lanes when relevant, then use primary research, official platform publications, reputable industry data, and directly dated sources.
 
 Investigate four things:
 1. What competitors and the wider category commonly say or do.

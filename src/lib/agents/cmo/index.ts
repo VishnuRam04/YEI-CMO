@@ -1,7 +1,11 @@
 import { generateText, Output } from "ai";
 import { ZodError } from "zod";
 import { analystAgent } from "@/lib/agents/analyst";
-import type { AnalystPayload, AnalystResult } from "@/lib/agents/analyst/schema";
+import {
+  AnalystResultSchema,
+  type AnalystPayload,
+  type AnalystResult,
+} from "@/lib/agents/analyst/schema";
 import { brandAnalystAgent } from "@/lib/agents/brand-analyst";
 import {
   BrandAnalystPayloadSchema,
@@ -22,6 +26,7 @@ import {
 import { copywriterAgent } from "@/lib/agents/copywriter";
 import type { CopywriterPayload } from "@/lib/agents/copywriter/schema";
 import { strategistAgent } from "@/lib/agents/strategist";
+import { saveProposedCampaign } from "@/lib/campaign/store";
 import {
   StrategistResultSchema,
   type StrategistPayload,
@@ -43,6 +48,7 @@ import {
   getOrCreateCmoConversation,
   loadCmoContext,
   loadPendingClarification,
+  loadPendingPlanOffer,
   saveCmoExchange,
 } from "./memory";
 import {
@@ -106,10 +112,40 @@ function strategyResponseFromHandoffs(handoffs: WorkerHandoff[]): CmoResponse | 
   const parsed = StrategistResultSchema.safeParse(handoff?.detail);
   if (!parsed.success) return null;
   const strategy = parsed.data;
+  const analystHandoff = handoffs.find((candidate) => candidate.agentId === "analyst");
+  const analyst = AnalystResultSchema.safeParse(analystHandoff?.detail);
+  const researchEvidence: CmoResponse["researchEvidence"] = analyst.success
+    ? {
+        status: analyst.data.intelligenceParts.webAdvantageResearch.status,
+        searchedAt: analyst.data.generatedAt,
+        summary: analyst.data.intelligenceParts.webAdvantageResearch.summary,
+        report: analyst.data.digest,
+        findings: analyst.data.marketSignals.slice(0, 8).map((signal) => ({
+          id: signal.id,
+          finding: signal.finding,
+          businessMeaning: signal.implication,
+          confidence: signal.confidence,
+          sourceUrls: signal.sourceUrls,
+        })),
+        sources: analyst.data.sources.slice(0, 20).map((source) => ({
+          id: source.id,
+          title: source.title,
+          url: source.url,
+          publishedAt: source.publishedAt,
+        })),
+        checks: analyst.data.connectorStatus.map((check) => ({
+          source: check.source,
+          status: check.status,
+          detail: check.detail,
+        })),
+        caveats: analyst.data.missingData.filter((item) =>
+          /research|connector|youtube|meta|tiktok|trend|public|citation/i.test(item)),
+      }
+    : undefined;
   const verdictTitles = {
     strong: "This is a strong idea",
-    promising: "Good idea — refine the execution",
-    "needs-work": "The idea needs tightening",
+    promising: "Good idea — here are three ways to do it",
+    "needs-work": "The idea needs a few changes",
     "not-recommended": "I would not run it as proposed",
   } as const;
   return {
@@ -126,6 +162,7 @@ function strategyResponseFromHandoffs(handoffs: WorkerHandoff[]): CmoResponse | 
     })),
     recommendedOptionId: strategy.recommendedExperimentId,
     executionPlan: {
+      strategyId: strategy.strategyId,
       campaignName: strategy.executionPlan.campaignName,
       startDate: strategy.executionPlan.startDate,
       endDate: strategy.executionPlan.endDate,
@@ -137,9 +174,12 @@ function strategyResponseFromHandoffs(handoffs: WorkerHandoff[]): CmoResponse | 
       schedule: strategy.executionPlan.schedule,
       measurement: strategy.executionPlan.measurement,
     },
+    researchEvidence,
     recommendation: "",
+    // The plan exists now, so this turn is not offering to build one.
+    planOffer: false,
     nextStep: strategy.informationRequests.find((request) => request.severity === "blocking")?.question ??
-      "Choose the option you want to develop, or ask me to combine parts of them.",
+      "Pick the option you prefer, and I can have the posts and images made for it.",
   };
 }
 
@@ -149,14 +189,15 @@ function strategyFailureResponseFromHandoffs(handoffs: WorkerHandoff[]): CmoResp
     handoff.status === "failed");
   if (!failure) return null;
   return {
-    title: "I couldn’t finish the comparison",
+    title: "I couldn't finish checking the options",
     executiveSummary: failure.agentId === "analyst"
-      ? "The current evidence check did not finish, so I won’t pretend to judge the idea without it."
-      : "The strategy comparison did not finish, so I can’t responsibly rank three options yet.",
+      ? "The current research did not finish, so I don't have enough information to judge the idea properly."
+      : "The three options were not completed, so I can't tell you which one is best yet.",
     keyPoints: [],
     options: [],
     recommendation: "",
-    nextStep: "Retry the request. The development trace will show which stage failed.",
+    planOffer: false,
+    nextStep: "Please try again. If you are developing the app, the trace will show which step failed.",
   };
 }
 
@@ -169,6 +210,7 @@ function campaignResponseFromHandoffs(handoffs: WorkerHandoff[]): CmoResponse | 
       keyPoints: [],
       options: [],
       recommendation: "",
+      planOffer: false,
       nextStep: "Open Campaign Review, save the campaign details, and retry.",
     };
   }
@@ -192,6 +234,7 @@ function campaignResponseFromHandoffs(handoffs: WorkerHandoff[]): CmoResponse | 
       keyPoints: review.issues.slice(0, 3).map((issue) => `${issue.severity}: ${issue.finding}`),
       options: [],
       recommendation: "",
+      planOffer: false,
       nextStep: review.recommendations[0].action,
     };
   }
@@ -209,6 +252,7 @@ function campaignResponseFromHandoffs(handoffs: WorkerHandoff[]): CmoResponse | 
     keyPoints: review.diagnosis.slice(0, 3),
     options: [],
     recommendation: "",
+    planOffer: false,
     nextStep: review.recommendations[0].action,
   };
 }
@@ -249,11 +293,23 @@ function deterministicCampaignReviewDecision(message: string): CmoDecision | nul
   });
 }
 
+/** The user asking outright for the plan to be built. */
+export function explicitPlanRequest(message: string): boolean {
+  return /\b(?:campaign plan|content plan|marketing plan|go-to-market|gtm)\b/i.test(message) ||
+    /\b(?:create|build|make|write|draw up|put together|prepare|draft|give me|show me)\b[^.?!]{0,40}\b(?:plan|strategy|campaign)\b/i.test(message);
+}
+
+/** A short yes to a plan offer the previous turn made. */
+export function agreesToPlanOffer(message: string): boolean {
+  return /^(?:yes|yep|yeah|yup|ok|okay|sure|please|go ahead|do it|go for it|sounds good|let'?s do it|build it|make it|create it|proceed)\b/i
+    .test(message.trim());
+}
+
 function deterministicStrategyDecision(message: string): CmoDecision | null {
-  const explicitStrategy = /\b(?:strategy|strategic plan|go-to-market|gtm|campaign plan|content plan)\b/i.test(message);
-  const promotionAdvice = /\b(?:promotion|offer|campaign|marketing idea)\b/i.test(message) &&
-    /\b(?:thinking of|plan|create|recommend|suggest|what do you think|should we|how should)\b/i.test(message);
-  if (!explicitStrategy && !promotionAdvice) {
+  // Only an outright request for the plan short-circuits the model. Advice
+  // seeking ("should we...", "is this a good idea") stays conversational so
+  // the idea can be talked through before anything is planned.
+  if (!explicitPlanRequest(message)) {
     return null;
   }
   const channel = ["linkedin", "instagram", "email"].find((candidate) =>
@@ -286,6 +342,45 @@ function deterministicStrategyDecision(message: string): CmoDecision | null {
 
 function canonicalSelector(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/**
+ * Names of products actually present in the confirmed catalogue. The CMO
+ * prompt only receives catalogue counts, never the names, so it readily
+ * invents plausible ones ("Merdeka Intake") from the user's wording. The
+ * Strategist then correctly refuses to plan against products that do not
+ * exist, which turned an ordinary request into a dead end. Selectors are
+ * checked here so an invented name is simply dropped, while a genuine one
+ * still reaches the Strategist and its catalogue guard.
+ */
+function confirmedProductNames(kernelValue: unknown): string[] {
+  const kernel = kernelValue && typeof kernelValue === "object" && !Array.isArray(kernelValue)
+    ? kernelValue as Record<string, unknown>
+    : {};
+  const catalogues = Array.isArray(kernel.productCatalogues) ? kernel.productCatalogues : [];
+  return catalogues.flatMap((value) => {
+    const catalogue = value && typeof value === "object" ? value as Record<string, unknown> : {};
+    const products = Array.isArray(catalogue.products) ? catalogue.products : [];
+    return products.flatMap((entry) => {
+      const product = entry && typeof entry === "object" ? entry as Record<string, unknown> : {};
+      return [product.name, product.sku]
+        .filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+    });
+  });
+}
+
+/** Keeps only selectors that match a confirmed catalogue name or SKU. */
+export function catalogueBackedSelectors(
+  selectors: string[],
+  kernel: unknown,
+): string[] {
+  const confirmed = confirmedProductNames(kernel).map(canonicalSelector).filter(Boolean);
+  if (confirmed.length === 0) return [];
+  return selectors.filter((selector) => {
+    const canonical = canonicalSelector(selector);
+    return canonical.length > 0 && confirmed.some((name) =>
+      name === canonical || name.includes(canonical) || canonical.includes(name));
+  });
 }
 
 export function explicitProductSelectors(
@@ -364,8 +459,13 @@ async function runStrategyPipeline(
   plan: CmoDecision["delegations"][number],
   input: AgentInput<CmoPayload>,
   activeDirective: string | undefined,
+  kernel: unknown,
+  conversationId: string,
 ): Promise<WorkerHandoff[]> {
-  const productSelectors = explicitProductSelectors(plan.instruction, plan.products);
+  const productSelectors = catalogueBackedSelectors(
+    explicitProductSelectors(plan.instruction, plan.products),
+    kernel,
+  );
   const intelligencePayload = {
     ...dateRange(plan, "combined"),
     productNames: productSelectors,
@@ -406,13 +506,7 @@ async function runStrategyPipeline(
 
   const analystHandoff: WorkerHandoff = {
     ...basicHandoff("analyst", "completed", intelligence.summary),
-    detail: {
-      snapshotId: intelligence.result.snapshotId,
-      generatedAt: intelligence.result.generatedAt,
-      dataThrough: intelligence.result.dataThrough,
-      digest: intelligence.result.digest,
-      missingData: intelligence.result.missingData,
-    },
+    detail: intelligence.result,
   };
   const strategyPayload: StrategistPayload = {
     objective: plan.instruction,
@@ -465,6 +559,21 @@ async function runStrategyPipeline(
     status: "completed",
     detail: { summary: strategy.summary, output: strategy.result },
   });
+  // The plan has to outlive the chat message it arrived in so the user can
+  // choose an option and open it on the plan page. A storage failure must not
+  // lose the strategy the user is about to read, so it is logged, not thrown.
+  try {
+    await saveProposedCampaign({
+      brandId: input.brandId,
+      conversationId,
+      strategy: strategy.result as StrategistResult,
+    });
+  } catch (error) {
+    console.error(
+      `[cmo] could not persist campaign for trace ${input.traceId}.`,
+      error,
+    );
+  }
   const requests = strategyRequests(strategy.result);
   return [
     analystHandoff,
@@ -582,7 +691,7 @@ async function delegate(
         brandId: input.brandId,
         ...(plan.campaignId ? { id: plan.campaignId } : {}),
       },
-      orderBy: { updatedAt: "desc" },
+      orderBy: [{ status: "desc" }, { updatedAt: "desc" }],
     });
     if (!campaign) {
       return basicHandoff("campaign-critic", "failed", "No saved campaign is available to review.");
@@ -716,6 +825,11 @@ export const cmoAgent: Agent<CmoPayload, CmoResult> = {
         ? storedActivity
         : input.payload.recentActivity;
       const pendingClarification = await loadPendingClarification(conversationId);
+      // The Strategist only runs on the user's say-so: either they asked for
+      // the plan outright, or they agreed to the offer made last turn.
+      const planOfferPending = await loadPendingPlanOffer(conversationId);
+      const planApproved = explicitPlanRequest(input.payload.message) ||
+        (planOfferPending && agreesToPlanOffer(input.payload.message));
       emitCmoDevTrace(input.traceId, {
         agentId: "cmo",
         stage: "context",
@@ -808,7 +922,7 @@ export const cmoAgent: Agent<CmoPayload, CmoResult> = {
         input.payload.message,
         brand.name,
       );
-      if (conversational && !pendingClarification) {
+      if (conversational && !pendingClarification && !planApproved) {
         await saveCmoExchange({
           conversationId,
           userMessage: input.payload.message,
@@ -849,6 +963,7 @@ export const cmoAgent: Agent<CmoPayload, CmoResult> = {
         kernel: brand.kernel,
         voice: brand.voice,
         strategicDirective: brand.directives[0]?.statement,
+        planApproved,
       });
 
       emitCmoDevTrace(input.traceId, {
@@ -886,13 +1001,31 @@ export const cmoAgent: Agent<CmoPayload, CmoResult> = {
           delegations: decision.delegations,
         },
       });
-      const requestedPlans = decision.delegations.slice(0, MAX_DELEGATIONS);
+      // Prompt adherence drifts, so the gate is enforced here too: without
+      // approval a strategist delegation is dropped and the conversational
+      // reply the model wrote alongside it stands on its own.
+      const gatedPlans = planApproved
+        ? decision.delegations
+        : decision.delegations.filter((plan) => plan.agentId !== "strategist");
+      const requestedPlans = gatedPlans.slice(0, MAX_DELEGATIONS);
       const hasStrategy = requestedPlans.some((plan) => plan.agentId === "strategist");
       const plans = hasStrategy
         ? requestedPlans.filter((plan) => plan.agentId !== "analyst" && plan.agentId !== "copywriter")
         : requestedPlans;
 
-      let response: CmoResponse = decision.response;
+      // If the model tried to plan anyway, its reply is usually a routing
+      // stub. Turn it into an explicit offer so the turn still ends somewhere.
+      const strategyGated = !planApproved &&
+        decision.delegations.some((plan) => plan.agentId === "strategist");
+      let response: CmoResponse = strategyGated
+        ? {
+            ...decision.response,
+            options: [],
+            executionPlan: undefined,
+            planOffer: true,
+            nextStep: "Want me to build the full plan for this?",
+          }
+        : decision.response;
       let inputTokens = decisionCall?.usage.inputTokens ?? 0;
       let outputTokens = decisionCall?.usage.outputTokens ?? 0;
 
@@ -903,6 +1036,8 @@ export const cmoAgent: Agent<CmoPayload, CmoResult> = {
               plan,
               input,
               brand.directives[0]?.statement,
+              brand.kernel,
+              conversationId,
             ));
           } else {
             workerHandoffs.push(await delegate(plan, input, brand.url));

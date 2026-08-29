@@ -34,6 +34,10 @@ const CmoOptionsSchema = z.array(CmoOptionSchema).max(3)
   .default([]);
 
 export const CmoExecutionPlanSchema = z.object({
+  // Links the rendered plan back to its stored campaign so choosing an option
+  // can rebuild the schedule. Optional so responses stored before campaigns
+  // were persisted still parse.
+  strategyId: z.string().trim().min(1).max(160).optional(),
   campaignName: z.string().trim().min(1).max(160),
   startDate: z.iso.date(),
   endDate: z.iso.date(),
@@ -68,6 +72,38 @@ export const CmoExecutionPlanSchema = z.object({
   }),
 });
 
+export const CmoResearchEvidenceSchema = z.object({
+  status: z.enum(["available", "partial", "unavailable"]),
+  searchedAt: z.iso.datetime(),
+  summary: z.string().trim().min(1).max(1_200),
+  report: z.string().trim().max(5_000).default(""),
+  findings: z.array(z.object({
+    id: z.string().trim().min(1).max(100),
+    finding: z.string().trim().min(1).max(1_000),
+    businessMeaning: z.string().trim().min(1).max(1_000),
+    confidence: z.number().min(0).max(1),
+    sourceUrls: z.array(z.url()).max(6),
+  })).max(8),
+  sources: z.array(z.object({
+    id: z.string().trim().min(1).max(100),
+    title: z.string().trim().min(1).max(500),
+    url: z.url(),
+    publishedAt: z.iso.datetime().nullable(),
+  })).max(20),
+  checks: z.array(z.object({
+    source: z.enum([
+      "google-grounded-search",
+      "youtube-data",
+      "meta-ad-library",
+      "tiktok-creative-center",
+      "google-trends",
+    ]),
+    status: z.enum(["active", "search-only", "unavailable", "skipped", "failed"]),
+    detail: z.string().trim().min(1).max(500),
+  })).max(10),
+  caveats: z.array(z.string().trim().min(1).max(800)).max(12),
+});
+
 export const CmoResponseSchema = z.object({
   title: z.string().min(1).max(80),
   executiveSummary: z.string().min(1).max(1_200),
@@ -79,10 +115,15 @@ export const CmoResponseSchema = z.object({
   options: CmoOptionsSchema,
   recommendedOptionId: z.string().trim().min(1).max(80).optional(),
   executionPlan: CmoExecutionPlanSchema.optional(),
+  researchEvidence: CmoResearchEvidenceSchema.optional(),
   // Kept for backwards compatibility with stored responses. New responses use
   // verdict + options and the chat no longer renders a recommendation block.
   recommendation: z.string().max(800).default(""),
   nextStep: z.string().min(1).max(500),
+  // True when this reply ends by offering to build the detailed campaign
+  // plan. The next turn reads it so a bare "yes" can be understood as
+  // approval; without it the CMO cannot tell agreement from a new idea.
+  planOffer: z.boolean().default(false),
   clarification: CmoClarificationSchema.nullable().optional(),
 });
 

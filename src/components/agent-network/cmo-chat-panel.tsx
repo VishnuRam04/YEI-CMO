@@ -3,12 +3,17 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import {
   Activity,
+  ArrowRight,
   BrainCircuit,
+  CalendarCheck,
   ChevronDown,
   Code2,
+  ExternalLink,
+  Globe2,
   LoaderCircle,
   Send,
   Sparkles,
+  Trash2,
   X,
 } from "lucide-react";
 import type { CmoResponse } from "@/lib/agents/cmo/schema";
@@ -112,10 +117,60 @@ function traceContent(value: unknown): string {
 function verdictLabel(verdict: NonNullable<CmoResponse["verdict"]>): string {
   return {
     strong: "Strong idea",
-    promising: "Promising — refine it",
-    "needs-work": "Needs work",
-    "not-recommended": "Not recommended",
+    promising: "Good idea — improve it",
+    "needs-work": "Needs a few changes",
+    "not-recommended": "I would not use this idea",
   }[verdict];
+}
+
+function planningBasisLabel(basis: NonNullable<CmoResponse["executionPlan"]>["planningBasis"]): string {
+  return {
+    "owned-and-market-evidence": "Based on your past results and current market research.",
+    "market-evidence-directional": "Based on current market research. Your own results are not available yet.",
+    "brand-led-assumption": "A starting plan based on your brand information. We need results to learn what works best.",
+  }[basis];
+}
+
+function researchDate(value: string): string {
+  return new Date(value).toLocaleDateString("en-MY", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function researchCheckName(source: NonNullable<CmoResponse["researchEvidence"]>["checks"][number]["source"]): string {
+  return {
+    "google-grounded-search": "Google web search",
+    "youtube-data": "YouTube public data",
+    "meta-ad-library": "Meta Ad Library",
+    "tiktok-creative-center": "TikTok Creative Center",
+    "google-trends": "Google Trends",
+  }[source];
+}
+
+function researchCheckStatus(status: NonNullable<CmoResponse["researchEvidence"]>["checks"][number]["status"]): string {
+  return {
+    active: "Checked",
+    "search-only": "Checked through web search",
+    unavailable: "Not connected",
+    skipped: "Not needed for this request",
+    failed: "Could not check",
+  }[status];
+}
+
+function researchConfidence(value: number): string {
+  if (value >= 0.8) return "Strong support";
+  if (value >= 0.6) return "Useful signal";
+  return "Early signal";
+}
+
+function plainResearchText(value: string): string {
+  return value
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/^\s*[-*]\s+/gm, "• ")
+    .trim();
 }
 
 export function CmoChatPanel({
@@ -139,6 +194,13 @@ export function CmoChatPanel({
   const [devTraceOpen, setDevTraceOpen] = useState(true);
   const [traceEvents, setTraceEvents] = useState<DevTraceEvent[]>([]);
   const [clock, setClock] = useState(() => Date.now());
+  const [approvedPlan, setApprovedPlan] = useState<{
+    campaignName: string;
+    totalAssets: number;
+    startDate: string;
+    endDate: string;
+    channel: string;
+  } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -368,9 +430,57 @@ export function CmoChatPanel({
     }
   }
 
+  /**
+   * Records the chosen option before continuing the conversation. The
+   * Strategist only schedules its own recommended option, so the server
+   * rebuilds the schedule around this one and the plan page picks it up.
+   */
+  async function chooseOption(response: CmoResponse, optionId: string, label: string) {
+    const strategyId = response.executionPlan?.strategyId;
+    if (strategyId && brand) {
+      try {
+        const saved = await fetch("/api/campaign", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ brandId: brand.id, strategyId, optionId }),
+        });
+        const body = await saved.json();
+        // Report the rebuilt plan, not the preview: choosing a different
+        // option changes the channel, dates and number of posts.
+        setApprovedPlan(saved.ok && body?.campaign
+          ? {
+              campaignName: body.campaign.executionPlan.campaignName,
+              totalAssets: body.campaign.executionPlan.totalAssets,
+              startDate: body.campaign.executionPlan.startDate,
+              endDate: body.campaign.executionPlan.endDate,
+              channel: body.campaign.executionPlan.schedule[0]?.channel ?? "",
+            }
+          : null);
+      } catch {
+        // A failed save must not block the reply; the chat still carries it.
+        setApprovedPlan(null);
+      }
+    }
+    await sendMessage(label);
+  }
+
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     void sendMessage(draft);
+  }
+
+  // Starts a fresh conversation rather than deleting anything: dropping the
+  // stored id makes the next request omit conversationId, which the CMO
+  // treats as a new thread. Earlier threads stay readable in the database.
+  function clearChat() {
+    if (status !== "idle") return;
+    setMessages([]);
+    setTraceEvents([]);
+    setConversationId(null);
+    setApprovedPlan(null);
+    setDraft("");
+    setBrandError("");
+    if (brand) window.localStorage.removeItem(conversationKey(brand.id));
   }
 
   const latestTrace = traceEvents.at(-1);
@@ -390,16 +500,29 @@ export function CmoChatPanel({
           <strong>CMO Agent</strong>
           <span><i /> {brand?.name ?? "Connecting to brand memory"}</span>
         </div>
-        {variant === "drawer" && (
+        <div className="cmo-chat-actions">
           <button
             type="button"
-            className="cmo-chat-close"
-            onClick={onClose}
-            aria-label="Close CMO chat"
+            className="cmo-chat-clear"
+            onClick={clearChat}
+            disabled={status !== "idle" || messages.length === 0}
+            title="Start a new conversation"
+            aria-label="Clear the conversation and start a new one"
           >
-            <X size={16} />
+            <Trash2 size={14} />
+            <span>Clear</span>
           </button>
-        )}
+          {variant === "drawer" && (
+            <button
+              type="button"
+              className="cmo-chat-close"
+              onClick={onClose}
+              aria-label="Close CMO chat"
+            >
+              <X size={16} />
+            </button>
+          )}
+        </div>
       </header>
 
       {devTraceEnabled && (
@@ -511,7 +634,9 @@ export function CmoChatPanel({
                             key={option.id}
                             type="button"
                             className={recommended ? "recommended" : ""}
-                            onClick={() => void sendMessage(
+                            onClick={() => void chooseOption(
+                              message.response!,
+                              option.id,
                               `I choose option ${index + 1}, "${option.title}": ${option.summary}. Treat this as the approved direction and ask only for execution details you still need.`,
                             )}
                             disabled={status !== "idle" || Boolean(message.response?.clarification)}
@@ -537,6 +662,93 @@ export function CmoChatPanel({
                       ))}
                     </ul>
                   )}
+                  {message.response.researchEvidence && (
+                    <details className="cmo-research-evidence">
+                      <summary>
+                        <Globe2 size={14} />
+                        <span>
+                          <b>What the Analyst found</b>
+                          <small>
+                            {message.response.researchEvidence.sources.length} public sources checked on {researchDate(message.response.researchEvidence.searchedAt)}
+                          </small>
+                        </span>
+                        <ChevronDown size={14} />
+                      </summary>
+                      <div className="cmo-research-body">
+                        <p>{message.response.researchEvidence.summary}</p>
+
+                        {message.response.researchEvidence.report && (
+                          <details className="cmo-research-report">
+                            <summary>Read the full Google research notes <ChevronDown size={11} /></summary>
+                            <p>{plainResearchText(message.response.researchEvidence.report)}</p>
+                          </details>
+                        )}
+
+                        {message.response.researchEvidence.findings.length > 0 ? (
+                          <div className="cmo-research-findings">
+                            {message.response.researchEvidence.findings.map((finding, index) => (
+                              <article key={finding.id}>
+                                <header>
+                                  <b>Finding {index + 1}</b>
+                                  <span>{researchConfidence(finding.confidence)}</span>
+                                </header>
+                                <p>{plainResearchText(finding.finding)}</p>
+                                <div>
+                                  <b>What this means for the business</b>
+                                  <p>{plainResearchText(finding.businessMeaning)}</p>
+                                </div>
+                                {finding.sourceUrls.length > 0 && (
+                                  <nav aria-label={`Sources for finding ${index + 1}`}>
+                                    {finding.sourceUrls.map((url) => {
+                                      const source = message.response?.researchEvidence?.sources.find((item) => item.url === url);
+                                      return (
+                                        <a href={url} target="_blank" rel="noreferrer" key={url}>
+                                          {source?.title ?? "Open source"} <ExternalLink size={9} />
+                                        </a>
+                                      );
+                                    })}
+                                  </nav>
+                                )}
+                              </article>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="cmo-research-empty">No cited web finding was available for this request.</div>
+                        )}
+
+                        {message.response.researchEvidence.sources.length > 0 && (
+                          <section className="cmo-research-sources">
+                            <b>Public sources</b>
+                            <div>
+                              {message.response.researchEvidence.sources.map((source) => (
+                                <a href={source.url} target="_blank" rel="noreferrer" key={source.id}>
+                                  <span>{source.title}</span>
+                                  <ExternalLink size={10} />
+                                </a>
+                              ))}
+                            </div>
+                          </section>
+                        )}
+
+                        <section className="cmo-research-checks">
+                          <b>Competitor and platform checks</b>
+                          {message.response.researchEvidence.checks.map((check) => (
+                            <div key={check.source} className={check.status}>
+                              <span><b>{researchCheckName(check.source)}</b><small>{check.detail}</small></span>
+                              <em>{researchCheckStatus(check.status)}</em>
+                            </div>
+                          ))}
+                        </section>
+
+                        {message.response.researchEvidence.caveats.length > 0 && (
+                          <section className="cmo-research-caveats">
+                            <b>What could not be checked</b>
+                            {message.response.researchEvidence.caveats.map((caveat) => <p key={caveat}>{caveat}</p>)}
+                          </section>
+                        )}
+                      </div>
+                    </details>
+                  )}
                   {message.response.executionPlan && (
                     <details
                       className="cmo-execution-plan"
@@ -544,39 +756,28 @@ export function CmoChatPanel({
                     >
                       <summary>
                         <span>
-                          <b>Recommended execution plan</b>
+                          <b>What the best-fit option looks like</b>
                           <small>{message.response.executionPlan.cadence}</small>
                         </span>
                         <ChevronDown size={14} />
                       </summary>
                       <div className="cmo-plan-body">
                         <div className="cmo-plan-overview">
-                          <span><b>{message.response.executionPlan.totalAssets}</b> assets</span>
-                          <span><b>{planDate(message.response.executionPlan.startDate)}</b> start</span>
-                          <span><b>{planDate(message.response.executionPlan.endDate)}</b> review</span>
+                          <span><b>{message.response.executionPlan.totalAssets}</b> posts</span>
+                          <span><b>{planDate(message.response.executionPlan.startDate)}</b> starts</span>
+                          <span><b>{planDate(message.response.executionPlan.endDate)}</b> ends</span>
                           <span><b>{message.response.executionPlan.costLevel}</b> cost</span>
                         </div>
-                        <div className="cmo-plan-schedule">
-                          {message.response.executionPlan.schedule.map((item) => (
-                            <article key={`${item.sequence}-${item.date}`}>
-                              <time className="cmo-plan-date">
-                                <b>{item.day}</b>
-                                <small>{planDate(item.date)} · {item.publishTimeLocal}</small>
-                              </time>
-                              <div className="cmo-plan-content">
-                                <small>{item.channel} · {item.assetType}</small>
-                                <b>{item.theme}</b>
-                                <p>{item.action}</p>
-                                <em>Expected impact: {item.expectedImpact}</em>
-                              </div>
-                            </article>
-                          ))}
-                        </div>
+                        <p className="cmo-plan-note">
+                          This is what the best-fit option would look like. Pick
+                          an option below and I will schedule it properly — the
+                          full day-by-day plan then opens on the Plan page.
+                        </p>
                         <div className="cmo-plan-measurement">
-                          <span><b>Primary metric</b>{message.response.executionPlan.measurement.primaryMetric}</span>
-                          <span><b>Success threshold</b>{message.response.executionPlan.measurement.successThreshold}</span>
-                          <span><b>Stop condition</b>{message.response.executionPlan.measurement.stopCondition}</span>
-                          <span><b>Evidence basis</b>{message.response.executionPlan.planningBasis.replaceAll("-", " ")}</span>
+                          <span><b>What to watch</b>{message.response.executionPlan.measurement.primaryMetric}</span>
+                          <span><b>A good result</b>{message.response.executionPlan.measurement.successThreshold}</span>
+                          <span><b>When to pause</b>{message.response.executionPlan.measurement.stopCondition}</span>
+                          <span><b>How this plan was made</b>{planningBasisLabel(message.response.executionPlan.planningBasis)}</span>
                           <p>{message.response.executionPlan.measurement.timingBasis}</p>
                         </div>
                       </div>
@@ -629,6 +830,29 @@ export function CmoChatPanel({
         )}
         <div ref={messagesEndRef} />
       </div>
+
+      {approvedPlan && (
+        <section className="cmo-plan-ready">
+          <header>
+            <CalendarCheck size={15} />
+            <div>
+              <b>{approvedPlan.campaignName} is scheduled</b>
+              <small>
+                {approvedPlan.totalAssets} posts on {approvedPlan.channel} ·{" "}
+                {planDate(approvedPlan.startDate)} – {planDate(approvedPlan.endDate)}
+              </small>
+            </div>
+          </header>
+          <p>
+            The full day-by-day plan is on the Plan page. Every post there has a
+            <b> Write it</b> button — the Copywriter drafts that post&apos;s words
+            and makes its image from the plan, so you never start from a blank page.
+          </p>
+          <a className="cmo-plan-link" href="/plan">
+            Open the full plan <ArrowRight size={13} />
+          </a>
+        </section>
+      )}
 
       <form className="cmo-chat-form" onSubmit={submit}>
         <textarea

@@ -75,4 +75,16 @@ describe("Analyst research connectors", () => {
       expect.objectContaining({ source: "meta-ad-library", status: "skipped" }),
     ]));
   });
+
+  it("attempts the Meta competitor check for a general competitor-viewing request", async () => {
+    const result = await runResearchConnectors(
+      context("Show what nearby competitors are doing online in Malaysia"),
+      { environment: {} },
+    );
+
+    expect(result.statuses).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: "meta-ad-library", status: "unavailable" }),
+    ]));
+    expect(result.missingData.join(" ")).toContain("META_AD_LIBRARY_ACCESS_TOKEN");
+  });
 });

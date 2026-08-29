@@ -49,6 +49,27 @@ model CmoMessage {
   @@index([conversationId, createdAt])
 }
 
+/// An approved campaign: the full Strategist result plus the execution plan
+/// rebuilt for whichever option the user actually chose. The Strategist only
+/// ever schedules its own recommended option, so the plan is recomputed on
+/// selection rather than stored once.
+model Campaign {
+  id               String   @id @default(cuid())
+  brandId          String
+  brand            Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  conversationId   String?
+  strategyId       String   @unique
+  objective        String   @db.Text
+  selectedOptionId String
+  status           String   @default("proposed")
+  strategy         Json
+  executionPlan    Json
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([brandId, createdAt])
+}
+
 model Plan {
   id        String     @id @default(cuid())
   brandId   String
@@ -82,6 +103,10 @@ model Asset {
   body       String    @db.Text
   mediaUrl   String?
   mediaType  String?
+  /// Image bytes kept in the database when no blob store is configured, so
+  /// image generation works without an external storage credential. Served
+  /// through /api/media/[id]; null whenever mediaUrl points at a blob host.
+  mediaData  Bytes?
   score      Int?
   subScores  Json?
   reasons    Json?
@@ -105,23 +130,6 @@ model Metric {
   spend       Float
   conversions Int
   @@index([brandId, date])
-}
-
-model Campaign {
-  id               String   @id @default(cuid())
-  brandId          String
-  conversationId   String?
-  strategyId       String   @unique
-  objective        String
-  selectedOptionId String
-  status           String   @default("proposed")
-  strategy         Json
-  executionPlan    Json
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  brand            Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
-
-  @@index([brandId, createdAt])
 }
 
 model Pattern {

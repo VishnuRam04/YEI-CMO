@@ -52,6 +52,13 @@ const voice = {
 
 const visualKit = {
   palette: ['#0B3D2E', '#F4E9D8'],
+  paletteRoles: [
+    { hex: '#0B3D2E', role: 'primary' },
+    { hex: '#F4E9D8', role: 'accent' },
+  ],
+  motifs: ['stacked crates'],
+  typography: ['bold condensed headings'],
+  logoDescription: 'Type: combination; Wording: NORTHWIND',
   styleFragment: 'matte, industrial, high-contrast product photography',
   logoSafeArea: 'keep 10% padding on all sides',
 };
@@ -117,5 +124,49 @@ describe('buildImagePrompt', () => {
     expect(prompt).toContain(visualKit.styleFragment);
     expect(prompt).toContain(visualKit.logoSafeArea);
     expect(prompt).toContain('#0B3D2E');
+  });
+
+  it('keeps lettering out of a plain image', () => {
+    const prompt = buildImagePrompt(kernel, visualKit, 'Hero shot.');
+    expect(prompt).toContain('Do not include any text/lettering');
+    expect(prompt).not.toContain('TEXT TO SET IN THE POSTER');
+  });
+
+  it('sets the approved copy and brand mark into a poster', () => {
+    const prompt = buildImagePrompt(kernel, visualKit, 'Post 1 of the campaign.', {
+      headline: 'Watch them do it themselves',
+      supportingLines: ['Hands-on learning for ages 3 to 6'],
+      highlights: ['Pours their own drink', 'Packs their own bag'],
+      callToAction: 'Message us to book a free trial',
+    });
+    // The wording is quoted, so the model cannot paraphrase an approved claim.
+    expect(prompt).toContain('Watch them do it themselves');
+    expect(prompt).toContain('Hands-on learning for ages 3 to 6');
+    expect(prompt).toContain('Message us to book a free trial');
+    // Colours carry their roles, and the brand mark is described.
+    expect(prompt).toContain('#0B3D2E (primary)');
+    expect(prompt).toContain('Wording: NORTHWIND');
+    expect(prompt).toContain('stacked crates');
+    expect(prompt).toContain('informational graphic, not a photograph');
+    expect(prompt).toContain('Do not invent prices');
+    // The brand spec must be applied silently, never drawn as a swatch chart.
+    expect(prompt).toContain('INSTRUCTION, NOT CONTENT');
+    expect(prompt).toContain('Do not render');
+    expect(prompt).toContain('do not repeat the same illustration twice');
+    // Highlights drive the icon set that makes it read as an infographic.
+    expect(prompt).toContain('Pours their own drink');
+    expect(prompt).toContain('its own icon');
+    expect(prompt).toContain('well under a third of the poster');
+    expect(prompt).toContain('Never draw an ellipsis');
+  });
+
+  it('refuses to invent a mark when the brand has no confirmed logo', () => {
+    const prompt = buildImagePrompt(
+      kernel,
+      { ...visualKit, logoDescription: '' },
+      'Post 1.',
+      { headline: 'A', supportingLines: [], highlights: [], callToAction: 'B' },
+    );
+    expect(prompt).toContain('Do not invent a logo');
   });
 });

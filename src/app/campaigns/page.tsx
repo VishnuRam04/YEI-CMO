@@ -22,11 +22,14 @@ export default async function CampaignsPage() {
     where: { brandId: activeBrand.id },
     orderBy: { updatedAt: "desc" },
   });
-  const campaignViews = campaigns.map((campaign) => ({
-    row: campaign,
-    definition: campaignDefinitionFromRecord(campaign),
-    latestReview: latestCampaignReview(campaign.executionPlan),
-  }));
+  const statusRank = (status: string) => status === "selected" ? 2 : status === "proposed" ? 1 : 0;
+  const campaignViews = campaigns
+    .map((campaign) => ({
+      row: campaign,
+      definition: campaignDefinitionFromRecord(campaign),
+      latestReview: latestCampaignReview(campaign.executionPlan),
+    }))
+    .sort((left, right) => statusRank(right.row.status) - statusRank(left.row.status));
   const initialResult = campaignViews
     .map((campaign) => CampaignCriticResultSchema.safeParse(campaign.latestReview?.result))
     .find((parsed) => parsed.success);
@@ -45,6 +48,7 @@ export default async function CampaignsPage() {
         name: campaign.definition.name,
         startDate: campaign.definition.startDate,
         endDate: campaign.definition.endDate,
+        definition: campaign.definition,
       }))}
       initialResult={initialResult?.success ? initialResult.data : null}
     />

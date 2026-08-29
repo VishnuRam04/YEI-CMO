@@ -8,8 +8,21 @@ import type {
   AgentOutput,
 } from "@/lib/agents/types";
 
-const timeoutFor = (agentId: AgentId) =>
-  agentId === "brand-analyst" ? 110_000 : 20_000;
+// The CMO runs its own decomposition call, then the Analyst and the
+// Strategist in sequence, so its ceiling must cover all three. Measured
+// provider latency is 20-26s for the grounded research call and 25-56s for
+// the structured strategy call; anything tighter forces silent fallbacks.
+const AGENT_TIMEOUT_MS: Record<AgentId, number> = {
+  "cmo": 150_000,
+  "brand-analyst": 110_000,
+  "copywriter": 30_000,
+  "analyst": 40_000,
+  "strategist": 85_000,
+  "brand-judge": 20_000,
+  "campaign-critic": 20_000,
+};
+
+const timeoutFor = (agentId: AgentId) => AGENT_TIMEOUT_MS[agentId] ?? 20_000;
 
 function normaliseError(error: unknown): AgentError {
   if (error instanceof ZodError) {

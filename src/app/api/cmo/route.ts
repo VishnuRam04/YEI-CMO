@@ -12,6 +12,9 @@ import { runAgent } from "@/lib/agents/run";
 import { getDb } from "@/lib/db";
 
 export const runtime = "nodejs";
+// The CMO orchestrates its own decomposition plus the Analyst and the
+// Strategist in sequence. Must exceed the CMO ceiling in lib/agents/run.ts.
+export const maxDuration = 240;
 
 const encoder = new TextEncoder();
 const CmoRequestSchema = z.object({

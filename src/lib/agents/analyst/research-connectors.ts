@@ -211,7 +211,7 @@ async function metaAdLibraryConnector(
   environment: ConnectorEnvironment,
   country: string | null,
 ): Promise<Pick<ResearchConnectorResult, "signals" | "sources" | "statuses" | "missingData">> {
-  const requested = /\b(?:meta|facebook|instagram|competitor ads?|ad library|advertising creative)\b/i.test(
+  const requested = /\b(?:meta|facebook|instagram|competitors?|competitor ads?|ad library|advertising creative|nearby businesses?|nearby schools?)\b/i.test(
     [context.payload.objective, ...context.payload.channels].filter(Boolean).join(" "),
   );
   if (!requested) {

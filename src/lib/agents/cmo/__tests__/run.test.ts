@@ -8,13 +8,17 @@ const mocks = vi.hoisted(() => ({
   getOrCreateConversation: vi.fn(),
   loadContext: vi.fn(),
   loadPendingClarification: vi.fn(),
+  loadPendingPlanOffer: vi.fn(),
+  campaignUpsert: vi.fn(),
   saveExchange: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
   getDb: () => ({
     brand: { findUnique: mocks.findUnique },
-    campaign: { findFirst: mocks.findCampaign },
+    // The pipeline records the built plan; storage itself is covered by the
+    // campaign store's own tests.
+    campaign: { findFirst: mocks.findCampaign, upsert: mocks.campaignUpsert },
   }),
 }));
 
@@ -28,10 +32,17 @@ vi.mock("../memory", () => ({
   getOrCreateCmoConversation: mocks.getOrCreateConversation,
   loadCmoContext: mocks.loadContext,
   loadPendingClarification: mocks.loadPendingClarification,
+  loadPendingPlanOffer: mocks.loadPendingPlanOffer,
   saveCmoExchange: mocks.saveExchange,
 }));
 
-import { cmoAgent, explicitProductSelectors } from "../index";
+import {
+  agreesToPlanOffer,
+  catalogueBackedSelectors,
+  cmoAgent,
+  explicitPlanRequest,
+  explicitProductSelectors,
+} from "../index";
 
 const brand = {
   id: "brand_1",
@@ -55,6 +66,7 @@ const response = {
   keyPoints: ["The Brand Kernel aligns every specialist."],
   options: [],
   recommendation: "Prioritise proof of learning over raw content volume.",
+  planOffer: false,
   nextStep: "Draft one launch narrative around the learning loop.",
 };
 
@@ -67,6 +79,8 @@ describe("CMO orchestrator", () => {
     mocks.getOrCreateConversation.mockResolvedValue("conversation_1");
     mocks.loadContext.mockResolvedValue([]);
     mocks.loadPendingClarification.mockResolvedValue(null);
+    mocks.loadPendingPlanOffer.mockResolvedValue(false);
+    mocks.campaignUpsert.mockResolvedValue({});
     mocks.saveExchange.mockResolvedValue(undefined);
   });
 
@@ -149,16 +163,30 @@ describe("CMO orchestrator", () => {
     mocks.findCampaign.mockResolvedValue({
       id: "campaign_1",
       brandId: "brand_1",
-      name: "Launch campaign",
-      updatedAt: new Date("2026-08-28T00:00:00.000Z"),
-      definition: {
-        id: "campaign_1",
-        name: "Launch campaign",
+      objective: "Generate qualified demo requests",
+      selectedOptionId: "exp-proof",
+      status: "selected",
+      strategy: {
+        strategicThesis: "Proof-led content will improve qualified response.",
+        targetAudiences: ["Operations leaders"],
+        offerStrategy: "Show verified workflow outcomes.",
+        experiments: [{
+          id: "exp-proof",
+          title: "Proof sprint",
+          hypothesis: "Proof will improve demo requests.",
+          channel: "linkedin",
+          primaryMetric: "Demo requests",
+        }],
+      },
+      executionPlan: {
+        campaignName: "Launch campaign",
         startDate: "2026-09-01",
         endDate: "2026-09-14",
+        schedule: [{ channel: "linkedin" }],
+        measurement: { primaryMetric: "Demo requests" },
       },
-      assets: [],
-      reviews: [],
+      createdAt: new Date("2026-08-28T00:00:00.000Z"),
+      updatedAt: new Date("2026-08-28T00:00:00.000Z"),
     });
     const recommendations = [1, 2, 3].map((rank) => ({
       rank,
@@ -212,12 +240,43 @@ describe("CMO orchestrator", () => {
       expiresAt: "2026-08-27T00:00:00.000Z",
       stats: [],
       performanceSignals: [],
-      marketSignals: [],
+      marketSignals: [{
+        id: "market-1",
+        finding: "Nearby schools mainly promote discounts and facilities.",
+        implication: "Showing real classroom outcomes may help the brand stand out.",
+        sourceUrls: ["https://example.com/competitor-research"],
+        observedAt: "2026-08-26T00:00:00.000Z",
+        confidence: 0.8,
+      }],
+      intelligenceParts: {
+        ownedPerformance: {
+          status: "missing",
+          recordCount: 0,
+          summary: "No imported performance records are available.",
+        },
+        webAdvantageResearch: {
+          status: "available",
+          sourceCount: 1,
+          summary: "One current competitor pattern was found from one public source.",
+        },
+      },
+      connectorStatus: [{
+        source: "google-grounded-search",
+        status: "active",
+        detail: "Current public webpages were checked.",
+        checkedAt: "2026-08-26T00:00:00.000Z",
+      }],
       patterns: [],
       opportunities: [],
       risks: [],
       missingData: ["Social accounts are not connected."],
-      sources: [],
+      sources: [{
+        id: "source-1",
+        title: "Competitor research",
+        url: "https://example.com/competitor-research",
+        publishedAt: null,
+        retrievedAt: "2026-08-26T00:00:00.000Z",
+      }],
       digest: "No owned metrics were available.",
     };
     const strategy = {
@@ -305,7 +364,7 @@ describe("CMO orchestrator", () => {
       ...input,
       payload: {
         ...input.payload,
-        message: "im thinking of having a campaign for merdeka to get more parents to sign their student up",
+        message: "create a campaign plan for merdeka to get more parents to sign their students up",
       },
     });
 
@@ -315,15 +374,101 @@ describe("CMO orchestrator", () => {
     expect(output.result?.response.options).toHaveLength(3);
     expect(output.result?.response.recommendedOptionId).toBe("exp-balanced");
     expect(output.result?.response.executionPlan?.totalAssets).toBe(6);
+    expect(output.result?.response.researchEvidence).toMatchObject({
+      status: "available",
+      summary: "One current competitor pattern was found from one public source.",
+      report: "No owned metrics were available.",
+    });
+    expect(output.result?.response.researchEvidence?.findings[0].businessMeaning)
+      .toContain("stand out");
+    expect(output.result?.response.researchEvidence?.sources[0].title)
+      .toBe("Competitor research");
     expect(output.result?.response.recommendation).toBe("");
     expect(output.result?.response.clarification).toBeUndefined();
-    expect(output.result?.response.nextStep).toContain("Choose the option");
+    expect(output.result?.response.nextStep).toContain("Pick the option");
     expect(mocks.runAgent).toHaveBeenCalledTimes(2);
     expect(mocks.runAgent.mock.calls[0][1].payload.mode).toBe("combined");
     expect(mocks.runAgent.mock.calls[0][1].payload.productNames).toEqual([]);
     expect(mocks.runAgent.mock.calls[1][1].payload.intelligence).toEqual(intelligence);
     expect(mocks.runAgent.mock.calls[1][1].payload.productSelectors).toEqual([]);
     expect(mocks.generateText).not.toHaveBeenCalled();
+  });
+
+  it("talks an idea through instead of jumping to a plan", async () => {
+    mocks.generateText.mockResolvedValue({
+      output: {
+        intent: "strategize",
+        response: {
+          title: "Worth doing, with one change",
+          executiveSummary: "A Merdeka intake is good timing, but the offer needs to be clearer.",
+          keyPoints: ["Parents decide on trust, not discounts."],
+          options: [],
+          recommendation: "",
+          planOffer: false,
+          nextStep: "Placeholder.",
+        },
+        delegations: [{
+          agentId: "strategist",
+          instruction: "Build a Merdeka campaign",
+          url: "",
+          channel: "none",
+          from: "",
+          to: "",
+          products: [],
+          topics: [],
+          horizon: "sprint",
+        }],
+      },
+      usage,
+    });
+
+    const output = await cmoAgent.run({
+      ...input,
+      payload: {
+        ...input.payload,
+        message: "im thinking of opening a new intake for merdeka, is this a good idea?",
+      },
+    });
+
+    expect(output.ok).toBe(true);
+    expect(mocks.runAgent).not.toHaveBeenCalled();
+    expect(output.result?.delegations).toEqual([]);
+    expect(output.result?.response.planOffer).toBe(true);
+    expect(output.result?.response.options).toEqual([]);
+    expect(output.result?.response.nextStep).toContain("build the full plan");
+  });
+
+  it("builds the plan once the user agrees to the offer", async () => {
+    mocks.loadPendingPlanOffer.mockResolvedValue(true);
+    mocks.runAgent.mockResolvedValue({ ok: false, summary: "analyst unavailable" });
+
+    const output = await cmoAgent.run({
+      ...input,
+      payload: { ...input.payload, message: "yes please" },
+    });
+
+    expect(output.ok).toBe(true);
+    // The gate opened, so the Strategist pipeline ran rather than being dropped.
+    expect(mocks.runAgent).toHaveBeenCalled();
+  });
+
+  it("classifies plan consent and outright plan requests", () => {
+    expect(explicitPlanRequest("create a campaign plan for merdeka")).toBe(true);
+    expect(explicitPlanRequest("build me a plan")).toBe(true);
+    expect(explicitPlanRequest("is this a good idea?")).toBe(false);
+    expect(explicitPlanRequest("how do i get more parents to sign up")).toBe(false);
+    expect(agreesToPlanOffer("yes please")).toBe(true);
+    expect(agreesToPlanOffer("go ahead")).toBe(true);
+    expect(agreesToPlanOffer("not yet, what about cost?")).toBe(false);
+  });
+
+  it("drops product names the confirmed catalogue does not contain", () => {
+    const kernel = {
+      productCatalogues: [{ products: [{ name: "Playgroup Programme", sku: "PG-1" }] }],
+    };
+    expect(catalogueBackedSelectors(["Merdeka Intake", "3-Day Free Trial"], kernel)).toEqual([]);
+    expect(catalogueBackedSelectors(["Playgroup Programme"], kernel)).toEqual(["Playgroup Programme"]);
+    expect(catalogueBackedSelectors(["Playgroup Programme"], {})).toEqual([]);
   });
 
   it("returns a typed input error when the brand does not exist", async () => {
