@@ -11,7 +11,16 @@ import {
   Youtube,
 } from "lucide-react";
 import { PageHeading } from "@/components/ui/page-heading";
-import { loadLatestCampaign, type StoredCampaign } from "@/lib/campaign/store";
+import {
+  loadBookedCampaigns,
+  loadLatestCampaign,
+  type StoredCampaign,
+} from "@/lib/campaign/store";
+import {
+  CampaignCalendar,
+  type CalendarBooking,
+  type CalendarCampaign,
+} from "@/components/plan/campaign-calendar";
 import { getDb } from "@/lib/db";
 
 export const runtime = "nodejs";
@@ -41,6 +50,48 @@ function readableDate(value: string): string {
         month: "short",
         timeZone: "UTC",
       });
+}
+
+
+/**
+ * Flattens saved campaigns into calendar rows. Each campaign keeps a lane so
+ * its bookings share one colour across the month, which is what makes two
+ * overlapping campaigns readable.
+ */
+function toCalendar(campaigns: StoredCampaign[]): {
+  bookings: CalendarBooking[];
+  entries: CalendarCampaign[];
+  initialMonth: string;
+} {
+  const entries: CalendarCampaign[] = campaigns.map((campaign, lane) => ({
+    campaignId: campaign.id,
+    strategyId: campaign.strategyId,
+    campaignName: campaign.executionPlan.campaignName,
+    status: campaign.status,
+    lane,
+    startDate: campaign.executionPlan.startDate,
+    endDate: campaign.executionPlan.endDate,
+    totalAssets: campaign.executionPlan.totalAssets,
+  }));
+  const bookings = campaigns.flatMap((campaign, lane) =>
+    campaign.executionPlan.schedule.map((item) => ({
+      campaignId: campaign.id,
+      strategyId: campaign.strategyId,
+      campaignName: campaign.executionPlan.campaignName,
+      status: campaign.status,
+      lane,
+      sequence: item.sequence,
+      date: item.date,
+      publishTimeLocal: item.publishTimeLocal,
+      channel: item.channel,
+      assetType: item.assetType,
+      theme: item.theme,
+    })));
+  // Open on the month the work actually starts in, not today's.
+  const earliest = entries
+    .map((entry) => entry.startDate)
+    .sort()[0] ?? new Date().toISOString().slice(0, 10);
+  return { bookings, entries, initialMonth: `${earliest.slice(0, 7)}-01` };
 }
 
 function UnavailablePlan({ detail }: { detail: string }) {
@@ -91,7 +142,13 @@ function EmptyPlan() {
   );
 }
 
-function ApprovedPlan({ campaign }: { campaign: StoredCampaign }) {
+function ApprovedPlan({
+  campaign,
+  calendar,
+}: {
+  campaign: StoredCampaign;
+  calendar: ReturnType<typeof toCalendar>;
+}) {
   const { strategy, executionPlan } = campaign;
   const chosen = strategy.experiments.find(
     (experiment) => experiment.id === campaign.selectedOptionId,
@@ -112,6 +169,14 @@ function ApprovedPlan({ campaign }: { campaign: StoredCampaign }) {
           </Link>
         }
       />
+
+      {calendar.entries.length > 0 && (
+        <CampaignCalendar
+          bookings={calendar.bookings}
+          campaigns={calendar.entries}
+          initialMonth={calendar.initialMonth}
+        />
+      )}
 
       <div className="plan-summary">
         <div><b>{executionPlan.totalAssets}</b><span>posts planned</span></div>
@@ -246,17 +311,25 @@ export default async function PlanPage() {
   // render a calm message, not replace the page with a runtime error screen.
   // Rendering stays outside the try so genuine render errors still surface.
   let campaign: StoredCampaign | null = null;
+  let saved: StoredCampaign[] = [];
   let failure = "";
   try {
     const brand = await getDb().brand.findFirst({
       orderBy: { updatedAt: "desc" },
       select: { id: true },
     });
-    campaign = brand ? await loadLatestCampaign(brand.id) : null;
+    if (brand) {
+      [campaign, saved] = await Promise.all([
+        loadLatestCampaign(brand.id),
+        loadBookedCampaigns(brand.id),
+      ]);
+    }
   } catch (error) {
     failure = error instanceof Error ? error.message : String(error);
   }
 
   if (failure) return <UnavailablePlan detail={failure} />;
-  return campaign ? <ApprovedPlan campaign={campaign} /> : <EmptyPlan />;
+  return campaign
+    ? <ApprovedPlan campaign={campaign} calendar={toCalendar(saved)} />
+    : <EmptyPlan />;
 }

@@ -132,6 +132,25 @@ export async function loadCampaignByStrategyId(
   return row ? parse(row) : null;
 }
 
+/**
+ * Campaigns the user actually committed to, newest first.
+ *
+ * Every plan the Strategist builds is stored as a proposal, so including those
+ * would fill the calendar with drafts that were never chosen. Only a selected
+ * campaign represents real bookings.
+ */
+export async function loadBookedCampaigns(
+  brandId: string,
+  limit = 5,
+): Promise<StoredCampaign[]> {
+  const rows = await getDb().campaign.findMany({
+    where: { brandId, status: "selected" },
+    orderBy: { updatedAt: "desc" },
+    take: limit,
+  });
+  return rows.map(parse).filter((row): row is StoredCampaign => row !== null);
+}
+
 /** The most recent campaign for a brand, preferring one the user has chosen. */
 export async function loadLatestCampaign(
   brandId: string,
