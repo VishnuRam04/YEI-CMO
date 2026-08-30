@@ -442,6 +442,8 @@ async function runTextGeneration(
   });
 }
 
+const NEWLINE = String.fromCharCode(10);
+
 const IMAGE_MODEL_BY_TIER = {
   draft: "gemini-3.1-flash-lite-image",
   default: MODELS.copywriterImage,
@@ -484,105 +486,93 @@ async function runImageGeneration(
         highlights: payload.poster.highlights ?? [],
       }
     : undefined;
+  // Write the wording and judge it in the same attempt, so a rejection is
+  // corrected on the next pass instead of ending the request. Words baked into
+  // artwork cannot be edited afterwards, which is why this is gated at all.
+  let posterAudit: BrandAuditReport[] = [];
   if (!posterCopy && payload.posterSource) {
-    // maxRetries does not cover a schema mismatch: the SDK treats
-    // NoObjectGeneratedError as terminal. Tight word limits make a first-pass
-    // miss common, so the attempts are made explicitly here.
     const posterCopyAttempts = 3;
-    let lastFailure: unknown = null;
-    for (let attempt = 0; attempt < posterCopyAttempts && !posterCopy; attempt += 1) {
+    let lastFailure = "";
+    let corrections: string[] = [];
+
+    for (let attempt = 1; attempt <= posterCopyAttempts && !posterCopy; attempt += 1) {
+      let candidate;
       try {
         const written = await generateText({
           model: model(MODELS.copywriter),
-          prompt: buildPosterCopyPrompt(memory.kernel.name, payload.posterSource),
+          prompt: buildPosterCopyPrompt(memory.kernel.name, payload.posterSource, corrections),
           output: Output.object({ schema: PosterCopySchema }),
-          // Thinking tokens count against this budget, so 600 truncated the
-          // JSON mid-object and surfaced as a schema mismatch rather than as
-          // the token limit it actually was.
+          // Thinking tokens count against this budget, so a small cap
+          // truncated the JSON and surfaced as a schema mismatch.
           maxOutputTokens: 2_000,
           maxRetries: 1,
           providerOptions: { google: { thinkingConfig: { thinkingLevel: "low" } } },
         });
-        const copy = PosterCopySchema.parse(written.output);
-        posterCopy = {
-          headline: copy.headline,
-          supportingLines: [copy.subheadline],
-          callToAction: copy.callToAction,
-          highlights: copy.highlights,
-        };
+        candidate = PosterCopySchema.parse(written.output);
       } catch (error) {
-        lastFailure = error;
-        // The SDK's message only says the schema did not match; the offending
-        // text and the failing rule are what actually identify the problem.
-        console.error(
-          `[copywriter] poster wording attempt ${attempt + 1} failed.`,
-          NoObjectGeneratedError.isInstance(error)
-            ? { text: error.text, cause: error.cause }
-            : error,
-        );
+        lastFailure = error instanceof Error ? error.message : String(error);
+        console.error(`[copywriter] poster wording attempt ${attempt} did not parse.`, error);
+        continue;
       }
-    }
-    if (!posterCopy) {
-      // Without poster copy the piece would be a wordless illustration, which
-      // is not what was asked for, so the caller is told plainly.
-      return agentFailure({
-        agentId: "copywriter",
-        traceId: input.traceId,
-        model: MODELS.copywriter,
-        summary: "Poster wording could not be written",
-        error: {
-          code: "MODEL_ERROR",
-          message: "The poster wording could not be written. Please retry.",
-          detail: lastFailure instanceof Error ? lastFailure.message : String(lastFailure),
-          retryable: true,
-        },
-      });
-    }
-  }
 
-  // A poster is content the user sees, so its wording faces the same review as
-  // a caption. Words baked into artwork cannot be edited afterwards, which
-  // makes judging them before rendering more important, not less.
-  let posterAudit: BrandAuditReport[] = [];
-  if (posterCopy) {
-    const posterText = [
-      posterCopy.headline,
-      ...posterCopy.supportingLines,
-      ...posterCopy.highlights,
-      posterCopy.callToAction,
-    ].filter(Boolean).join("\n");
-    const reports = await reviewContent(
-      memory,
-      [{ id: "poster", content: posterText }],
-      "instagram",
-      "poster",
-    );
-    const report = reports.get("poster") ?? buildReport([]);
-    posterAudit = [{
-      angle: "poster",
-      passed: report.passed,
-      overallScore: report.overallScore,
-      criteria: report.criteria.map((criterion) => ({
-        criterion: criterion.criterion,
-        score: criterion.score,
-        passed: criterion.passed,
-        reasons: criterion.reasons,
-      })),
-      notes: report.notes,
-    }];
-    if (!report.passed) {
+      const draft = {
+        headline: candidate.headline,
+        supportingLines: [candidate.subheadline],
+        callToAction: candidate.callToAction,
+        highlights: candidate.highlights,
+      };
+      const reports = await reviewContent(
+        memory,
+        [{
+          id: "poster",
+          content: [
+            draft.headline,
+            ...draft.supportingLines,
+            ...draft.highlights,
+            draft.callToAction,
+          ].filter(Boolean).join(NEWLINE),
+        }],
+        "instagram",
+        "poster",
+      );
+      const report = reports.get("poster") ?? buildReport([]);
+      posterAudit = [{
+        angle: "poster",
+        passed: report.passed,
+        overallScore: report.overallScore,
+        criteria: report.criteria.map((criterion) => ({
+          criterion: criterion.criterion,
+          score: criterion.score,
+          passed: criterion.passed,
+          reasons: criterion.reasons,
+        })),
+        notes: report.notes,
+      }];
+
+      if (report.passed) {
+        posterCopy = draft;
+        break;
+      }
+      corrections = report.criteria
+        .filter((criterion) => !criterion.passed)
+        .map((criterion) => `${criterion.criterion}: ${criterion.reasons.join("; ")}`);
+      lastFailure = corrections.join(" | ");
+      console.error(
+        `[copywriter] poster wording attempt ${attempt} rejected (${report.overallScore}/100).`,
+        corrections,
+      );
+    }
+
+    if (!posterCopy) {
       return agentFailure({
         agentId: "copywriter",
         traceId: input.traceId,
         model: MODELS.copywriter,
-        summary: `Poster wording failed the Brand Judge - ${report.overallScore}/100`,
+        summary: "Poster wording failed the Brand Judge",
         error: {
           code: "VALIDATION_ERROR",
-          message: "The poster wording did not pass the Brand Judge. Please retry.",
-          detail: report.criteria
-            .filter((criterion) => !criterion.passed)
-            .map((criterion) => `${criterion.criterion}: ${criterion.reasons.join("; ")}`)
-            .join(" | ") || report.notes.join(" | "),
+          message: "The poster wording could not be made to pass the Brand Judge. Please retry.",
+          detail: lastFailure,
           retryable: true,
         },
       });
@@ -595,48 +585,59 @@ async function runImageGeneration(
     payload.briefText,
     posterCopy,
   );
-  const modelPrompt = payload.referenceImageUrls?.length
-    ? [{
-        role: "user" as const,
-        content: [
-          { type: "text" as const, text: prompt },
-          ...payload.referenceImageUrls.map((url) => ({
-            type: "image" as const,
-            image: url,
-          })),
-        ],
-      }]
-    : prompt;
-  const generated = await generateText({
-    model: model(imageModel),
-    prompt: modelPrompt,
-    maxRetries: 1,
-    providerOptions: {
-      google: { responseModalities: ["IMAGE"] },
-    },
-  });
-  const imageFile = generated.files.find((file) => file.mediaType.startsWith("image/"));
-  if (!imageFile) {
-    return agentFailure({
-      agentId: "copywriter",
-      traceId: input.traceId,
-      model: MODELS.copywriter,
-      summary: "Image generation failed",
-      error: {
-        code: "MODEL_ERROR",
-        message: "Gemini did not return an image. Please retry.",
-        retryable: true,
+  // Generate, judge the finished artwork, and if it is rejected try again with
+  // the judge's criticism attached. A poster that fails on a repeated word or
+  // an off-brand colour is usually fixed by one more pass, so failing on the
+  // first attempt put work back on the user that the loop can do itself.
+  const posterAttempts = 3;
+  let imageFile: { uint8Array: Uint8Array; mediaType: string } | null = null;
+  let lastRejection = "";
+  let corrections: string[] = [];
+
+  for (let attempt = 1; attempt <= posterAttempts; attempt += 1) {
+    const attemptPrompt = corrections.length === 0
+      ? prompt
+      : `${prompt}
+
+WHAT WAS WRONG WITH YOUR PREVIOUS ATTEMPT - fix all of it:
+${corrections.map((note) => `- ${note}`).join(NEWLINE)}`;
+    const modelPrompt = payload.referenceImageUrls?.length
+      ? [{
+          role: "user" as const,
+          content: [
+            { type: "text" as const, text: attemptPrompt },
+            ...payload.referenceImageUrls.map((url) => ({
+              type: "image" as const,
+              image: url,
+            })),
+          ],
+        }]
+      : attemptPrompt;
+
+    const generated = await generateText({
+      model: model(imageModel),
+      prompt: modelPrompt,
+      maxRetries: 1,
+      providerOptions: {
+        google: { responseModalities: ["IMAGE"] },
       },
     });
-  }
+    const file = generated.files.find((entry) => entry.mediaType.startsWith("image/"));
+    if (!file) {
+      corrections = ["No image was produced. Return a single poster image."];
+      lastRejection = "Gemini did not return an image.";
+      continue;
+    }
 
-  // The rendered poster is judged before it is stored or shown: palette, brand
-  // mark, motif and the accuracy of the words exist only in the pixels.
-  if (posterCopy) {
+    if (!posterCopy) {
+      imageFile = file;
+      break;
+    }
+
     try {
       const visual = await judgeRenderedPoster(
         memory,
-        { bytes: imageFile.uint8Array, mediaType: imageFile.mediaType },
+        { bytes: file.uint8Array, mediaType: file.mediaType },
         [
           posterCopy.headline,
           ...posterCopy.supportingLines,
@@ -665,23 +666,19 @@ async function runImageGeneration(
         })),
         notes: combined.notes,
       }];
-      if (!combined.passed) {
-        return agentFailure({
-          agentId: "copywriter",
-          traceId: input.traceId,
-          model: MODELS.copywriter,
-          summary: `Poster failed the Brand Judge - ${combined.overallScore}/100`,
-          error: {
-            code: "VALIDATION_ERROR",
-            message: "The finished poster did not pass the Brand Judge. Please retry.",
-            detail: combined.criteria
-              .filter((item) => !item.passed)
-              .map((item) => `${item.criterion}: ${item.reasons.join("; ")}`)
-              .join(" | "),
-            retryable: true,
-          },
-        });
+
+      if (combined.passed) {
+        imageFile = file;
+        break;
       }
+      corrections = combined.criteria
+        .filter((item) => !item.passed)
+        .map((item) => `${item.criterion}: ${item.reasons.join("; ")}`);
+      lastRejection = corrections.join(" | ");
+      console.error(
+        `[copywriter] poster attempt ${attempt} rejected (${combined.overallScore}/100).`,
+        corrections,
+      );
     } catch (error) {
       // A visual review that cannot run must not silently become a pass.
       console.error("[copywriter] visual review unavailable.", error);
@@ -690,11 +687,26 @@ async function runImageGeneration(
         passed: false,
         notes: [...audit.notes, "The finished poster was not visually reviewed."],
       }));
+      imageFile = file;
+      break;
     }
   }
 
-  // Storage picks a blob host when one is configured and the database
-  // otherwise, so generating an image needs no credential beyond the model key.
+  if (!imageFile) {
+    return agentFailure({
+      agentId: "copywriter",
+      traceId: input.traceId,
+      model: MODELS.copywriter,
+      summary: `Poster failed the Brand Judge after ${posterAttempts} attempts`,
+      error: {
+        code: "VALIDATION_ERROR",
+        message: `The poster still did not pass the Brand Judge after ${posterAttempts} attempts. Please retry.`,
+        detail: lastRejection,
+        retryable: true,
+      },
+    });
+  }
+
   const stored = await storeGeneratedImage({
     brandId: input.brandId,
     traceId: input.traceId,
@@ -714,9 +726,9 @@ async function runImageGeneration(
       tier,
       brandAudit: posterAudit,
     },
-    summary: `1 image - ${tier} - ${stored.backend}`,
-    inputTokens: generated.usage.inputTokens ?? 0,
-    outputTokens: generated.usage.outputTokens ?? 0,
+    summary: `1 image - ${tier} - ${stored.backend} - ${posterAudit[0]?.overallScore ?? "unjudged"}/100`,
+    inputTokens: 0,
+    outputTokens: 0,
   });
 }
 

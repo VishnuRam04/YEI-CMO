@@ -234,8 +234,15 @@ ${refinement.priorText}
 export function buildPosterCopyPrompt(
   brandName: string,
   sourceText: string,
+  corrections: string[] = [],
 ): string {
-  return `Turn this approved ${brandName} social post into wording for a poster.
+  const fixes = corrections.length
+    ? `
+
+YOUR PREVIOUS WORDING WAS REJECTED. Fix all of this:
+${corrections.map((note) => `- ${note}`).join(NL)}`
+    : "";
+  return `Turn this approved ${brandName} social post into wording for a poster.${fixes}
 
 APPROVED POST
 <post>
@@ -338,11 +345,20 @@ ${identity}
 
 ${logoBlock}
 
-TEXT TO SET IN THE POSTER - reproduce this wording exactly, spelled correctly, and add no other words:
-Headline: ${poster.headline}
-${poster.supportingLines.map((line) => `Subheadline: ${line}`).join(NL)}
-${poster.highlights.map((line) => `Highlight (pair with its own icon): ${line}`).join(NL)}
-Call to action: ${poster.callToAction}
+TEXT TO SET IN THE POSTER - these exact lines and nothing else. The numbers
+are for reference only and must not appear in the artwork:
+${[poster.headline, ...poster.supportingLines, ...poster.highlights, poster.callToAction]
+    .filter(Boolean)
+    .map((line, index) => `${index + 1}. ${line}`)
+    .join(NL)}
+
+Line 1 is the headline and is the largest. Line 2 sits beneath it. The lines
+between that and the last one each pair with their own icon. The last line is
+the call to action, set in a button or banner.
+
+Do not draw any other words anywhere: no field names, no labels such as
+"Headline" or "Highlights" or "Contact", no website address, no phone number,
+no email, no social handle, no hashtags, no invented brand names.
 
 LAYOUT - this is an infographic, so pictures carry the meaning and words label it
 - Text must occupy well under a third of the poster. The rest is illustration, icons and colour.

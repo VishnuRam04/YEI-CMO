@@ -193,12 +193,17 @@ export function buildBrandJudgePrompt(
 These are the few words set into a poster: a headline, one subheadline, two or
 three short highlights and a call to action. They are meant to be read at a
 glance, so they are deliberately terse.
-- Do not expect emoji, hashtags, greetings, warmth or elaboration. Their
-  absence is correct for this format and must not reduce any score.
-- Judge tone on word choice and register only: would this brand say it this
-  way? Plain and short is on-tone when the brand asks for plain language.
+- Emoji, hashtags, greetings, warmth and elaboration do not belong in this
+  format. Their absence is correct. Never score tone below 75 for brevity, for
+  missing emoji, or for missing enthusiasm - that is the format working as
+  intended, not a fault.
+- Judge tone on word choice and register alone: would this brand say it this
+  way? Plain and short is fully on-tone when the brand asks for plain language,
+  and should score 85 or above.
 - Judge positioning and audience on whether the few words point at the right
-  offer and the right customer, not on how much they explain.`
+  offer and the right customer, not on how much they explain.
+- If your only criticism of a line is that it is short or plain, that is not a
+  criticism. Score it as a pass.`
     : `WHAT YOU ARE JUDGING
 These are full social captions. Judge them as complete posts.`;
   return `You are the Brand Judge. Score each draft against the brand's own
@@ -296,7 +301,12 @@ export function buildVisualJudgePrompt(
   return `You are the Brand Judge looking at a finished poster image.
 
 BRAND VISUAL RULES
-Palette - only these colours should dominate:
+Neutral grounds are always acceptable: white, off-white, cream, light grey and
+black or dark grey text are not off-brand and must never be counted against the
+palette. Judge the palette on the feature colours - headings, panels, buttons,
+illustrations - not on the background.
+
+Palette - the feature colours should come from this list:
 ${(kit.paletteRoles?.length
     ? kit.paletteRoles.map((entry) => `- ${entry.hex} (${entry.role})`)
     : (kit.palette ?? []).map((hex) => `- ${hex}`)).join("\n") || "- none confirmed"}
@@ -308,8 +318,9 @@ THE WORDS THAT SHOULD APPEAR, EXACTLY
 ${expectedWords.map((word) => `- ${word}`).join("\n")}
 
 Look at the image and score 0 to 100:
-palette    - Do the dominant colours match the brand palette? Off-brand
-             dominant colours score low.
+palette    - Do the feature colours come from the brand palette? Score low
+             only for a feature colour that is genuinely not in the list, not
+             for a neutral background or for using a subset of the palette.
 logo       - Does the brand mark appear, look like the description, and appear
              once rather than repeatedly? No mark at all when one is confirmed
              scores low, and so does the mark repeated several times.
@@ -319,8 +330,16 @@ legibility - Is the text readable, well spaced, inside the margins, and not
              overlapping faces or running off an edge?
 
 Also list in misspelledWords every word visible in the image that is
-misspelled, doubled, truncated, or is not in the list above. Read the image
-carefully; report an empty list only if every visible word is correct.`;
+misspelled, doubled or truncated.
+
+The brand mark carries its own wording and that wording is expected: do not
+report it as an error unless it is actually misspelled or duplicated. Words
+belonging to the brand name or its tagline are not "extra words".
+
+Report a word as extra only if it is neither in the list above nor part of the
+brand mark - a stray label, an invented web address, a phone number or a
+caption the poster was never given. Read the image carefully; report an empty
+list only if every visible word is correct.`;
 }
 
 /**

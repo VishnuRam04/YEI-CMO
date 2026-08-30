@@ -158,6 +158,9 @@ describe('buildImagePrompt', () => {
     expect(prompt).toContain('its own icon');
     expect(prompt).toContain('well under a third of the poster');
     expect(prompt).toContain('Never draw an ellipsis');
+    // Field names must not sit beside the text they describe, or they get drawn.
+    expect(prompt).not.toContain('Highlight (pair with its own icon)');
+    expect(prompt).toContain('no website address');
   });
 
   it('refuses to invent a mark when the brand has no confirmed logo', () => {
