@@ -66,17 +66,28 @@ export async function loadPendingClarification(
 }
 
 /** True when the previous assistant turn offered to build the detailed plan. */
+/**
+ * Whether the CMO has recently offered to build the plan.
+ *
+ * Looks back over the last few assistant turns rather than only the last one.
+ * A clarifying question in between sets planOffer false, and reading only the
+ * latest message meant an intervening question silently cancelled the user's
+ * agreement — so they said yes and were asked again.
+ */
 export async function loadPendingPlanOffer(
   conversationId: string,
 ): Promise<boolean> {
-  const latestAssistant = await getDb().cmoMessage.findFirst({
+  const recent = await getDb().cmoMessage.findMany({
     where: { conversationId, role: "assistant" },
     orderBy: { createdAt: "desc" },
+    take: 3,
     select: { response: true },
   });
-  if (!latestAssistant?.response) return false;
-  const parsed = CmoResponseSchema.safeParse(latestAssistant.response);
-  return parsed.success ? parsed.data.planOffer : false;
+  return recent.some((message) => {
+    if (!message.response) return false;
+    const parsed = CmoResponseSchema.safeParse(message.response);
+    return parsed.success && parsed.data.planOffer;
+  });
 }
 
 export async function saveCmoExchange(input: {

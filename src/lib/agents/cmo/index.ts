@@ -214,8 +214,29 @@ function strategyFailureResponseFromHandoffs(handoffs: WorkerHandoff[]): CmoResp
 
 /** The user asking outright for the plan to be built. */
 export function explicitPlanRequest(message: string): boolean {
-  return /\b(?:campaign plan|content plan|marketing plan|go-to-market|gtm)\b/i.test(message) ||
+  // Naming the artefact: "create a campaign plan for the launch".
+  const namesThePlan =
+    /\b(?:campaign plan|content plan|marketing plan|go-to-market|gtm)\b/i.test(message) ||
     /\b(?:create|build|make|write|draw up|put together|prepare|draft|give me|show me)\b[^.?!]{0,40}\b(?:plan|strategy|campaign)\b/i.test(message);
+  // Or just telling it to get on with it: "yes lets build it", "go ahead and
+  // build". Requiring the noun left people agreeing in plain English and being
+  // asked again.
+  const tellsItToBuild =
+    /\b(?:build|make|create|do|run)\s+(?:it|this|that|them)\b/i.test(message) ||
+    /\b(?:let'?s|lets)\s+(?:build|do|make|go|start)\b/i.test(message) ||
+    /\b(?:go ahead|get started|get going|crack on)\b/i.test(message);
+  return namesThePlan || tellsItToBuild;
+}
+
+/**
+ * Whether a reply is asking the user to approve building the plan. The flag
+ * the model sets is unreliable, and the next turn depends on it: an offer that
+ * is not recorded leaves the user agreeing and being asked again.
+ */
+export function offersToBuildThePlan(nextStep: string): boolean {
+  if (!/\?/.test(nextStep)) return false;
+  return /\b(?:build|create|make|put together|draw up|prepare)\b[^.?!]{0,30}\b(?:plan|campaign)\b/i.test(nextStep) ||
+    /\b(?:full|detailed|complete) plan\b/i.test(nextStep);
 }
 
 /** A short yes to a plan offer the previous turn made. */
@@ -1107,6 +1128,13 @@ export const cmoAgent: Agent<CmoPayload, CmoResult> = {
           planOffer: false,
           nextStep: askedQuestion || "Tell me how you would like to proceed.",
         };
+      }
+
+      // The model routinely writes an offer to build the plan while leaving
+      // planOffer false, and the next turn reads that flag to decide whether a
+      // "yes" means yes. Derive it from what was actually said instead.
+      if (!hasStrategy && offersToBuildThePlan(response.nextStep)) {
+        response = { ...response, planOffer: true };
       }
 
       // Special renderings only. There is no synthesis step any more: the

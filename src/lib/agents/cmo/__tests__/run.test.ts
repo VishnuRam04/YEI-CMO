@@ -41,6 +41,7 @@ vi.mock("../memory", () => ({
 
 import {
   agreesToPlanOffer,
+  offersToBuildThePlan,
   catalogueBackedSelectors,
   cmoAgent,
   explicitPlanRequest,
@@ -266,6 +267,32 @@ describe("CMO agent loop", () => {
     expect(explicitPlanRequest("is this a good idea?")).toBe(false);
     expect(agreesToPlanOffer("yes please")).toBe(true);
     expect(agreesToPlanOffer("not yet, what about cost?")).toBe(false);
+  });
+
+  it("recognises an offer to build even when the model forgets the flag", () => {
+    // Observed live: nextStep offered the plan while planOffer came back false,
+    // so the next "yes" was not treated as approval.
+    expect(offersToBuildThePlan("Want me to build the full plan for this?")).toBe(true);
+    expect(offersToBuildThePlan("Shall I put together the campaign plan?")).toBe(true);
+    expect(offersToBuildThePlan("Want me to build the full plan for this across Instagram and email?")).toBe(true);
+    // Not offers.
+    expect(offersToBuildThePlan("Which channel should we focus on?")).toBe(false);
+    expect(offersToBuildThePlan("Pick the option you prefer.")).toBe(false);
+    expect(offersToBuildThePlan("I have built the plan.")).toBe(false);
+  });
+
+  it("treats plain agreement to get on with it as a plan request", () => {
+    // These left users agreeing in ordinary English and being asked again,
+    // because the pattern demanded the word "plan" after the verb.
+    expect(explicitPlanRequest("Yes lets build it")).toBe(true);
+    expect(explicitPlanRequest("go ahead")).toBe(true);
+    expect(explicitPlanRequest("ok build it")).toBe(true);
+    expect(explicitPlanRequest("let's do it")).toBe(true);
+    expect(explicitPlanRequest("get started")).toBe(true);
+    // Still not a plan request.
+    expect(explicitPlanRequest("what do you think?")).toBe(false);
+    expect(explicitPlanRequest("is that a good idea?")).toBe(false);
+    expect(explicitPlanRequest("tell me about our business")).toBe(false);
   });
 
   it("drops product names the confirmed catalogue does not contain", () => {
