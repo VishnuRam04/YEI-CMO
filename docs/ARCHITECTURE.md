@@ -2,84 +2,100 @@
 
 An agentic marketing workspace for small businesses. The owner talks to a **CMO
 agent**, which decides for itself which specialists to bring in, and everything
-it writes is checked against the brand's own memory before anyone sees it.
+written is checked against the brand's own memory before anyone sees it.
 
 ---
 
-## The system
+## Architecture diagram
 
 ```mermaid
 flowchart LR
-    User([Business owner])
+    USER([User<br/>business owner])
 
-    subgraph App["Web app · Next.js"]
-        Chat["Conversation"]
-        Plan["Plan & calendar"]
-        Studio["Content studio"]
+    subgraph FE["Web app"]
+        direction TB
+        UI["Conversation<br/>Plan &amp; calendar<br/>Content studio"]
     end
 
-    CMO{{"CMO agent<br/>decides what to do next"}}
-
-    subgraph Team["Specialist agents"]
-        Analyst["Analyst<br/>market research"]
-        Strategist["Strategist<br/>campaign plans"]
-        Copywriter["Copywriter<br/>posts, posters, scripts"]
-        BrandAnalyst["Brand Analyst<br/>builds brand memory"]
-        Critic["Campaign Critic<br/>pre & post-flight review"]
+    subgraph B1["① Brand Memory Engine"]
+        direction TB
+        BA["Brand Analyst"]
+        Kernel["Brand kernel<br/>positioning · ICPs · proof"]
+        Voice["Voice &amp; visual identity<br/>tone · palette · logo"]
+        BA --> Kernel & Voice
     end
 
-    Judge{{"Brand Judge<br/>reviews everything written"}}
-    Memory[("Brand Memory<br/>+ campaigns · Postgres")]
-    LLM["Google Gemini"]
+    subgraph B2["② Orchestrator"]
+        direction TB
+        Loop["CMO agent loop<br/>decide → run → observe → decide"]
+        Guards["Runtime guards<br/>what is allowed to run"]
+        Loop --- Guards
+    end
 
-    User <--> App
-    App <--> CMO
-    CMO <--> Team
-    Copywriter <--> Judge
-    Team <--> Memory
-    CMO <--> Memory
-    Team & CMO & Judge --> LLM
+    subgraph B3["③ Specialist agents"]
+        direction TB
+        An["Analyst"]
+        St["Strategist"]
+        Cw["Copywriter"]
+        Cc["Campaign Critic"]
+    end
+
+    subgraph B4["④ Brand Judge"]
+        direction TB
+        Jd["Reviews everything written<br/>rewrite with reasons, up to 3×"]
+    end
+
+    subgraph B5["⑤ Tools &amp; storage"]
+        direction TB
+        DB[("Postgres · Neon")]
+        Gem["Google Gemini"]
+        Search["Grounded web search"]
+        Media["Image generation<br/>+ media store"]
+    end
+
+    USER <--> FE
+    FE <--> B2
+    B2 --> B3
+    B2 --> B1
+    Cw --> B4
+    B4 -. reject + reasons .-> Cw
+    B1 --> DB
+    B3 --> DB
+    B2 --> DB
+    An --> Search
+    Cw --> Media
+    B2 & B3 & B4 --> Gem
 ```
-
-**How it hangs together.** The owner only ever talks to the CMO. It reads Brand
-Memory, decides which specialists to run, and hands back a plan or an answer.
-Anything the Copywriter produces goes past the Brand Judge before it is shown.
 
 ---
 
-## The idea that matters: the CMO is a loop, not a router
+## Layers
 
-Most assistants decide everything up front and then execute blindly. The CMO
-runs one step, looks at the result, and decides again.
-
-```mermaid
-flowchart LR
-    A([Ask]) --> B{Decide<br/>next step}
-    B -->|answer| D([Reply])
-    B -->|need help| C[Run a specialist]
-    C --> E[See the result]
-    E --> B
-```
-
-Why it matters: if research comes back empty, the CMO **says so** instead of
-building a plan on nothing. A one-shot planner cannot react to its own results.
-
-The runtime, not the model, decides what is allowed to run — it will not build a
-campaign plan before the user has agreed to one, and it will not write content
-off an unapproved plan.
+| | Layer | Components | What it does |
+|---|---|---|---|
+| **L1** | Brand Intelligence | ① | Reads the brand's site and uploads once, and becomes the single source of truth for everything after |
+| **L2** | Agent Execution | ② ③ ④ | Decides what to do, does it, and reviews the result before the user sees it |
+| **L3** | Tools & Storage | ⑤ | Models, grounded search, database, generated media |
 
 ---
 
-## Nothing published is unreviewed
+## How it flows
 
-Every caption, poster and script is scored against the brand's confirmed memory
-by a **different model from the one that wrote it**, on voice, positioning,
-audience, evidence, tone, and — for posters — colour, logo, readability and
-spelling. Anything that fails is rewritten with the reasons attached, up to
-three times.
+**The owner only ever talks to the CMO.** It reads Brand Memory, decides which
+specialists to run, and hands back a plan or an answer.
 
-If the judge cannot be reached, content is marked *not reviewed* rather than
-passed.
+**The CMO is a loop, not a router.** Most assistants decide everything up front
+then execute blindly. This one runs a step, looks at the result, and decides
+again — so when research comes back empty it *says so* instead of building a
+plan on nothing.
+
+**Guards sit in the runtime, not the prompt.** It will not build a campaign plan
+before the user has agreed to one, and it will not write content off an
+unapproved plan. The model proposes; the code enforces.
+
+**Nothing published is unreviewed.** Every caption, poster and script is scored
+against the brand's confirmed memory by a *different model from the one that
+wrote it*. Failures are rewritten with the reasons attached.
 
 ---
 
@@ -90,7 +106,7 @@ passed.
 | App | Next.js · React · TypeScript |
 | Data | Postgres (Neon) via Prisma |
 | AI | Google Gemini via the Vercel AI SDK |
-| Images | Gemini image models, brand logo composited with sharp |
+| Images | Gemini image models · brand logo composited with sharp |
 | Hosting | Vercel |
 
 ## The models
@@ -108,8 +124,8 @@ that wrote the draft.
 | Brand Analyst | Gemini 3.1 Pro | Reads the brand's site and files |
 | Brand Judge | Gemini 3.1 Pro | Reviews everything written |
 
-Cost is tracked per turn and shown to the user: a question costs about RM0.02, a
-full campaign plan about RM0.13.
+Cost is tracked per turn and shown to the user: a question costs about **RM0.02**,
+a full campaign plan about **RM0.13**.
 
 ---
 
