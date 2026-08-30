@@ -815,7 +815,6 @@ export function CmoChatPanel({
                           <b>What the best-fit option looks like</b>
                           <small>{message.response.executionPlan.cadence}</small>
                         </span>
-                        <ChevronDown size={14} />
                       </summary>
                       <div className="cmo-plan-body">
                         <div className="cmo-plan-overview">
@@ -825,10 +824,25 @@ export function CmoChatPanel({
                           <span><b>{message.response.executionPlan.costLevel}</b> cost</span>
                         </div>
                         <p className="cmo-plan-note">
-                          This is what the best-fit option would look like. Pick
-                          an option below and I will schedule it properly — the
-                          full day-by-day plan then opens on the Plan page.
+                          This is the draft for the best-fit option. Pick an
+                          option below and I will schedule it properly — the
+                          full plan then opens on the Plan page.
                         </p>
+                        <div className="cmo-plan-schedule">
+                          {message.response.executionPlan.schedule.map((item) => (
+                            <article key={`${item.sequence}-${item.date}`}>
+                              <time className="cmo-plan-date">
+                                <b>{item.day}</b>
+                                <small>{planDate(item.date)} · {item.publishTimeLocal}</small>
+                              </time>
+                              <div className="cmo-plan-content">
+                                <small>{item.channel} · {item.assetType}</small>
+                                <b>{item.theme}</b>
+                                <p>{item.action}</p>
+                              </div>
+                            </article>
+                          ))}
+                        </div>
                         <div className="cmo-plan-measurement">
                           <span><b>What to watch</b>{message.response.executionPlan.measurement.primaryMetric}</span>
                           <span><b>A good result</b>{message.response.executionPlan.measurement.successThreshold}</span>

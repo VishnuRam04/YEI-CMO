@@ -543,10 +543,27 @@ h2, h3, p { margin-top: 0; }
 .cmo-plan-measurement span { display:grid; gap:2px; font-size:8px; line-height:1.45; }
 .cmo-plan-measurement b { color:#607e26; font-size:7px; text-transform:uppercase; letter-spacing:.07em; }
 .cmo-plan-measurement p { margin:2px 0 0; color:#748078; font-size:7px; line-height:1.45; }
-.cmo-chat-panel.workspace .cmo-execution-plan { margin:0 13px 14px; }
-.cmo-chat-panel.workspace .cmo-plan-overview { grid-template-columns:repeat(4,minmax(0,1fr)); }
-.cmo-chat-panel.workspace .cmo-plan-schedule article { grid-template-columns:90px minmax(0,1fr); padding:10px; }
-.cmo-chat-panel.workspace .cmo-plan-content p { font-size:9px; }
+.cmo-chat-panel.workspace .cmo-execution-plan { margin:0 15px 15px; }
+.cmo-chat-panel.workspace .cmo-execution-plan > summary { padding:13px 15px; }
+.cmo-chat-panel.workspace .cmo-execution-plan > summary b { font-size:13px; }
+.cmo-chat-panel.workspace .cmo-execution-plan > summary small { font-size:11px; }
+.cmo-chat-panel.workspace .cmo-plan-body { gap:13px; padding:0 15px 14px; }
+.cmo-chat-panel.workspace .cmo-plan-overview { grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; }
+.cmo-chat-panel.workspace .cmo-plan-overview span { padding:10px 11px; font-size:10px; }
+.cmo-chat-panel.workspace .cmo-plan-overview b { font-size:13px; }
+.cmo-chat-panel.workspace .cmo-plan-note { padding:12px 14px; font-size:11px; }
+/* The draft is meant to be read before choosing, so it gets reading sizes. */
+.cmo-chat-panel.workspace .cmo-plan-schedule { gap:8px; }
+.cmo-chat-panel.workspace .cmo-plan-date { font-size:11px; }
+.cmo-chat-panel.workspace .cmo-plan-date small { font-size:10px; }
+.cmo-chat-panel.workspace .cmo-plan-content b { font-size:13px; }
+.cmo-chat-panel.workspace .cmo-plan-content small { margin-top:3px; font-size:10px; }
+.cmo-chat-panel.workspace .cmo-plan-measurement { gap:9px; padding:13px; }
+.cmo-chat-panel.workspace .cmo-plan-measurement span { font-size:11px; line-height:1.55; }
+.cmo-chat-panel.workspace .cmo-plan-measurement b { font-size:9px; }
+.cmo-chat-panel.workspace .cmo-plan-measurement p { font-size:10px; }
+.cmo-chat-panel.workspace .cmo-plan-schedule article { grid-template-columns:104px minmax(0,1fr); padding:10px; }
+.cmo-chat-panel.workspace .cmo-plan-content p { margin-top:6px; font-size:11px; line-height:1.6; }
 .cmo-clarification-actions { display:flex; flex-wrap:wrap; gap:6px; margin:0 10px 11px; }
 .cmo-clarification-actions button { padding:7px 9px; color:#31402f; background:#c8f169; border:1px solid #a9d84c; border-radius:7px; font-size:8px; font-weight:700; cursor:pointer; }
 .cmo-clarification-actions button.secondary { color:#68756f; background:#f7f8f5; border-color:#dfe5dd; }
