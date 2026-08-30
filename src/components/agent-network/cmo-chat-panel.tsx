@@ -979,17 +979,20 @@ export function CmoChatPanel({
         >
           <Send size={15} />
         </button>
-        <small>Enter to send · Shift + Enter for a new line</small>
-        {/* Always shown, including at zero: a greeting is answered without a
-            model call, and hiding the counter then reads as broken. */}
-        <small
-          className="cmo-spend"
-          title={`${spend.inputTokens.toLocaleString("en-GB")} in · ${spend.outputTokens.toLocaleString("en-GB")} out · estimated at RM${MYR_PER_USD} to the US dollar`}
-        >
-          {thousandsOfTokens(spend.inputTokens + spend.outputTokens)} tokens
-          {" · est. "}
-          <b>{ringgit(spend.costUsd)}</b>
-        </small>
+        {/* A normal-flow row: both hints were absolutely positioned, which is
+            fragile and left the counter invisible. Always shown, including at
+            zero, since a greeting is answered without any model call. */}
+        <div className="cmo-chat-foot">
+          <small>Enter to send · Shift + Enter for a new line</small>
+          <small
+            className="cmo-spend"
+            title={`${spend.inputTokens.toLocaleString("en-GB")} in · ${spend.outputTokens.toLocaleString("en-GB")} out · estimated at RM${MYR_PER_USD} to the US dollar`}
+          >
+            {thousandsOfTokens(spend.inputTokens + spend.outputTokens)} tokens
+            {" · est. "}
+            <b>{ringgit(spend.costUsd)}</b>
+          </small>
+        </div>
       </form>
     </aside>
   );

@@ -306,15 +306,12 @@ h2, h3, p { margin-top: 0; }
 .cmo-chat-panel.workspace .cmo-chat-header strong { font-size: 15px; }
 .cmo-chat-panel.workspace .cmo-chat-messages { padding-top: 22px; }
 .cmo-chat-panel.workspace .cmo-chat-messages { padding-top: 30px; padding-bottom: 10px; }
-.cmo-chat-panel.workspace .cmo-chat-form { padding-top: 14px; padding-bottom: 30px; background: #f6f7f3; border-top: 0; }
+.cmo-chat-panel.workspace .cmo-chat-form { padding-top: 14px; padding-bottom: 18px; background: #f6f7f3; border-top: 0; }
 .cmo-chat-panel.workspace .cmo-chat-form textarea {
   min-height: 60px; padding: 15px 54px 15px 17px; font-size: 15px; line-height: 1.55;
   background: white; border-radius: 15px; box-shadow: 0 4px 20px rgba(18,34,28,.06);
 }
 .cmo-chat-panel.workspace .cmo-chat-form > button { top: 24px; right: calc(max(26px, (100% - 860px) / 2) + 10px); width: 36px; height: 36px; }
-.cmo-chat-panel.workspace .cmo-chat-form > small { left: max(26px, calc((100% - 860px) / 2)); bottom: 11px; font-size: 9px; }
-/* Outranks the rule above, which would otherwise stack both hints on the left. */
-.cmo-chat-panel.workspace .cmo-chat-form > small.cmo-spend { left: auto; right: max(26px, calc((100% - 860px) / 2)); }
 
 /* Reading sizes. The compact drawer keeps its own scale. */
 .cmo-chat-panel.workspace .cmo-chat-message { max-width: 82%; margin-bottom: 22px; }
@@ -365,8 +362,6 @@ h2, h3, p { margin-top: 0; }
 .cmo-chat-close { width:32px; height:32px; display:grid; place-items:center; color:#a8b5b1; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.08); border-radius:9px; cursor:pointer; }
 .cmo-chat-close:hover { color:white; background:rgba(255,255,255,.11); }
 .cmo-chat-actions { display:flex; align-items:center; gap:7px; }
-.cmo-chat-form > small.cmo-spend { left:auto; right:16px; color:#8b948f; font-variant-numeric:tabular-nums; cursor:default; }
-.cmo-chat-form > small.cmo-spend b { color:#4f5f57; font-weight:650; }
 .cmo-chat-clear { display:flex; align-items:center; gap:5px; height:32px; padding:0 10px; color:#a8b5b1; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.08); border-radius:9px; font-size:9px; letter-spacing:.05em; text-transform:uppercase; cursor:pointer; transition:color .15s ease, background .15s ease; }
 .cmo-chat-clear:hover:not(:disabled) { color:white; background:rgba(255,255,255,.11); }
 .cmo-chat-clear:disabled { opacity:.38; cursor:not-allowed; }
@@ -614,13 +609,16 @@ h2, h3, p { margin-top: 0; }
 .cmo-chat-thinking { display:flex; align-items:center; gap:7px; width:max-content; padding:8px 10px; color:#65716c; background:white; border:1px solid #dfe4de; border-radius:10px; font-size:9px; }
 .cmo-chat-thinking svg { color:#729d1d; animation:cmo-spin 1s linear infinite; }
 @keyframes cmo-spin { to { transform:rotate(360deg); } }
-.cmo-chat-form { position:relative; padding:12px 13px 25px; background:white; border-top:1px solid #dfe4de; }
+.cmo-chat-form { position:relative; padding:12px 13px 14px; background:white; border-top:1px solid #dfe4de; }
 .cmo-chat-form textarea { width:100%; min-height:61px; max-height:130px; resize:none; padding:11px 46px 11px 12px; color:var(--ink); background:#f7f8f5; border:1px solid #d6ddd6; border-radius:11px; outline:none; font-size:10px; line-height:1.5; }
 .cmo-chat-form textarea:focus { border-color:#9cc74b; box-shadow:0 0 0 3px rgba(200,241,105,.2); }
 .cmo-chat-form textarea:disabled { opacity:.58; }
 .cmo-chat-form > button { position:absolute; right:21px; top:20px; width:33px; height:33px; display:grid; place-items:center; color:var(--navy); background:var(--lime); border:0; border-radius:9px; cursor:pointer; }
 .cmo-chat-form > button:disabled { color:#95a09b; background:#e5e9e4; cursor:not-allowed; }
-.cmo-chat-form > small { position:absolute; left:16px; bottom:8px; color:#99a19e; font-size:7px; }
+.cmo-chat-foot { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:9px; }
+.cmo-chat-foot > small { color:#99a19e; font-size:9px; }
+.cmo-chat-foot > small.cmo-spend { color:#6f7a74; font-variant-numeric:tabular-nums; cursor:default; white-space:nowrap; }
+.cmo-chat-foot > small.cmo-spend b { color:#3f4a45; font-weight:700; }
 
 .onboard-page { max-width:1360px; }
 .onboard-stepper { display:flex; align-items:center; max-width:620px; margin:-8px 0 22px; color:#8c9692; font-size:9px; text-transform:uppercase; letter-spacing:.09em; font-weight:750; }
@@ -962,6 +960,5 @@ h2, h3, p { margin-top: 0; }
   .cmo-chat-panel.workspace .cmo-chat-form,
   .cmo-chat-panel.workspace .cmo-chat-header { padding-left:15px; padding-right:15px; }
   .cmo-chat-panel.workspace .cmo-chat-form > button { right:24px; }
-  .cmo-chat-panel.workspace .cmo-chat-form > small { left:15px; }
   .cmo-chat-panel.workspace .cmo-chat-message,.cmo-chat-panel.workspace .cmo-chat-message.user { max-width:92%; }
 }
