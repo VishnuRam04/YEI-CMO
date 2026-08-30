@@ -329,8 +329,11 @@ motif      - Are the brand's motifs used, without inventing a different visual
 legibility - Is the text readable, well spaced, inside the margins, and not
              overlapping faces or running off an edge?
 
-Also list in misspelledWords every word visible in the image that is
-misspelled, doubled or truncated.
+Also list in misspelledWords only the words you can actually read as wrong:
+letters transposed or dropped, a word printed twice in a row, or a word cut
+off mid-render. Read each one letter by letter before listing it. If a word is
+spelled correctly, leave it out even if the lettering is stylised, scripted or
+hard to read - that is a legibility question, not a spelling one.
 
 The brand mark carries its own wording and that wording is expected: do not
 report it as an error unless it is actually misspelled or duplicated. Words
@@ -368,8 +371,11 @@ export async function judgeRenderedPoster(
     providerOptions: { google: { thinkingConfig: { thinkingLevel: "low" } } },
   });
   const judged = VisualJudgementSchema.parse(call.output);
+  // The reader is not perfectly reliable at this, and it has flagged correctly
+  // spelled words. One flag should dent the score, not fail the poster; a
+  // genuinely broken render trips several at once and still fails.
   const spellingScore = judged.misspelledWords.length
-    ? Math.max(0, 100 - judged.misspelledWords.length * 34)
+    ? Math.max(0, 100 - judged.misspelledWords.length * 15)
     : 100;
   return [
     criterion("visual", Math.round(

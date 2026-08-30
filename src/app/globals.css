@@ -403,6 +403,7 @@ h2, h3, p { margin-top: 0; }
 .score-row-top > b { color:#3f4a45; font-size:9px; font-variant-numeric:tabular-nums; text-align:right; }
 .score-row.failed .score-row-top > i > em { background:#e0785a; }
 .score-row.failed .score-row-top > span,.score-row.failed .score-row-top > b { color:#b4442a; font-weight:600; }
+.score-warning { margin:11px 0 0; padding:9px 12px; background:#fdf4ee; border:1px solid #f0d3bf; border-radius:9px; color:#8a5326; font-size:10px; line-height:1.55; }
 .score-row > p { margin:4px 0 0 91px; color:#75807b; font-size:8px; line-height:1.55; }
 .script-card { padding:16px 18px; background:white; border:1px solid #e0e6dd; border-radius:14px; }
 .script-card > header { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:11px; }

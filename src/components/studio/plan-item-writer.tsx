@@ -89,6 +89,9 @@ function ScoreCard({ title, audit }: { title: string; audit: BrandAuditReport })
           </div>
         ))}
       </div>
+      {!audit.passed && audit.notes.length > 0 && (
+        <p className="score-warning">{audit.notes[audit.notes.length - 1]}</p>
+      )}
     </section>
   );
 }

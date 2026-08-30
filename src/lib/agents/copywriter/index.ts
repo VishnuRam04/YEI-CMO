@@ -490,6 +490,7 @@ async function runImageGeneration(
   // corrected on the next pass instead of ending the request. Words baked into
   // artwork cannot be edited afterwards, which is why this is gated at all.
   let posterAudit: BrandAuditReport[] = [];
+  let wordingCriteria: BrandAuditReport["criteria"] = [];
   if (!posterCopy && payload.posterSource) {
     const posterCopyAttempts = 3;
     let lastFailure = "";
@@ -551,6 +552,7 @@ async function runImageGeneration(
 
       if (report.passed) {
         posterCopy = draft;
+        wordingCriteria = posterAudit[0]?.criteria ?? [];
         break;
       }
       corrections = report.criteria
@@ -593,6 +595,12 @@ async function runImageGeneration(
   let imageFile: { uint8Array: Uint8Array; mediaType: string } | null = null;
   let lastRejection = "";
   let corrections: string[] = [];
+  // The best attempt is kept so a run that never quite passes still hands back
+  // a poster with the judge's concerns attached, rather than nothing at all.
+  let best: {
+    file: { uint8Array: Uint8Array; mediaType: string };
+    audit: BrandAuditReport;
+  } | null = null;
 
   for (let attempt = 1; attempt <= posterAttempts; attempt += 1) {
     const attemptPrompt = corrections.length === 0
@@ -645,8 +653,10 @@ ${corrections.map((note) => `- ${note}`).join(NEWLINE)}`;
           posterCopy.callToAction,
         ].filter(Boolean),
       );
+      // The wording verdict is fixed once accepted. Re-reading it off the
+      // previous attempt's combined report duplicated criteria every pass.
       const combined = buildReport([
-        ...(posterAudit[0]?.criteria ?? []).map((item) => ({
+        ...wordingCriteria.map((item) => ({
           criterion: item.criterion as never,
           score: item.score,
           passed: item.passed,
@@ -671,6 +681,9 @@ ${corrections.map((note) => `- ${note}`).join(NEWLINE)}`;
         imageFile = file;
         break;
       }
+      if (!best || combined.overallScore > best.audit.overallScore) {
+        best = { file, audit: posterAudit[0] };
+      }
       corrections = combined.criteria
         .filter((item) => !item.passed)
         .map((item) => `${item.criterion}: ${item.reasons.join("; ")}`);
@@ -693,18 +706,31 @@ ${corrections.map((note) => `- ${note}`).join(NEWLINE)}`;
   }
 
   if (!imageFile) {
-    return agentFailure({
-      agentId: "copywriter",
-      traceId: input.traceId,
-      model: MODELS.copywriter,
-      summary: `Poster failed the Brand Judge after ${posterAttempts} attempts`,
-      error: {
-        code: "VALIDATION_ERROR",
-        message: `The poster still did not pass the Brand Judge after ${posterAttempts} attempts. Please retry.`,
-        detail: lastRejection,
-        retryable: true,
-      },
-    });
+    if (!best) {
+      return agentFailure({
+        agentId: "copywriter",
+        traceId: input.traceId,
+        model: MODELS.copywriter,
+        summary: "No poster could be generated",
+        error: {
+          code: "MODEL_ERROR",
+          message: "No poster image was produced. Please retry.",
+          detail: lastRejection,
+          retryable: true,
+        },
+      });
+    }
+    // The wording already passed, so nothing unapproved can be on this poster.
+    // What remains are craft concerns, and showing the best attempt with them
+    // spelled out is more useful than handing back an error and no artwork.
+    imageFile = best.file;
+    posterAudit = [{
+      ...best.audit,
+      notes: [
+        ...best.audit.notes,
+        `Shown after ${posterAttempts} attempts without a clean pass. Check the points above before publishing.`,
+      ],
+    }];
   }
 
   const stored = await storeGeneratedImage({
