@@ -138,6 +138,12 @@ export const CmoResultSchema = z.object({
   delegations: z
     .array(z.enum(["brand-analyst", "copywriter", "analyst", "strategist", "campaign-critic"]))
     .max(3),
+  /** What this turn cost, across the CMO's loop and every specialist it ran. */
+  spend: z.object({
+    inputTokens: z.number().int().nonnegative(),
+    outputTokens: z.number().int().nonnegative(),
+    costUsd: z.number().nonnegative(),
+  }).default({ inputTokens: 0, outputTokens: 0, costUsd: 0 }),
 });
 
 export const CmoDecisionSchema = z.object({

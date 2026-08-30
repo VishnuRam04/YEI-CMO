@@ -229,6 +229,20 @@ function AgentActivity({ events, running }: { events: DevTraceEvent[]; running: 
   );
 }
 
+
+/** Thousands separators keep six-figure token counts readable at 9px. */
+function tokenCount(value: number): string {
+  return value >= 10_000
+    ? `${(value / 1_000).toFixed(1)}k`
+    : value.toLocaleString("en-GB");
+}
+
+/** Sub-cent spend is the normal case, so it needs more than two decimals. */
+function usd(value: number): string {
+  if (value === 0) return "$0.00";
+  return value < 0.01 ? `$${value.toFixed(4)}` : `$${value.toFixed(2)}`;
+}
+
 export function CmoChatPanel({
   open,
   onClose,
@@ -250,6 +264,7 @@ export function CmoChatPanel({
   const [devTraceOpen, setDevTraceOpen] = useState(false);
   const [traceEvents, setTraceEvents] = useState<DevTraceEvent[]>([]);
   const [clock, setClock] = useState(() => Date.now());
+  const [spend, setSpend] = useState({ inputTokens: 0, outputTokens: 0, costUsd: 0 });
   const [approvedPlan, setApprovedPlan] = useState<{
     campaignName: string;
     totalAssets: number;
@@ -416,6 +431,7 @@ export function CmoChatPanel({
                 response?: CmoResponse;
                 delegations?: string[];
                 conversationId?: string;
+                spend?: { inputTokens: number; outputTokens: number; costUsd: number };
                 presentation?: "conversation" | "brief";
               };
               error?: { message?: string };
@@ -452,6 +468,14 @@ export function CmoChatPanel({
                 conversationKey(brand.id),
                 nextConversationId,
               );
+            }
+            const turn = event.output.result?.spend;
+            if (turn) {
+              setSpend((current) => ({
+                inputTokens: current.inputTokens + turn.inputTokens,
+                outputTokens: current.outputTokens + turn.outputTokens,
+                costUsd: current.costUsd + turn.costUsd,
+              }));
             }
             setMessages((current) => [
               ...current,
@@ -534,6 +558,7 @@ export function CmoChatPanel({
     setTraceEvents([]);
     setConversationId(null);
     setApprovedPlan(null);
+    setSpend({ inputTokens: 0, outputTokens: 0, costUsd: 0 });
     setDraft("");
     setBrandError("");
     if (brand) window.localStorage.removeItem(conversationKey(brand.id));
@@ -556,6 +581,15 @@ export function CmoChatPanel({
           <strong>CMO Agent</strong>
           <span><i /> {brand?.name ?? "Connecting to brand memory"}</span>
         </div>
+        {spend.costUsd > 0 && (
+          <div
+            className="cmo-spend"
+            title={`${spend.inputTokens.toLocaleString("en-GB")} in · ${spend.outputTokens.toLocaleString("en-GB")} out · this conversation`}
+          >
+            <b>{usd(spend.costUsd)}</b>
+            <small>{tokenCount(spend.inputTokens + spend.outputTokens)} tokens</small>
+          </div>
+        )}
         <div className="cmo-chat-actions">
           <button
             type="button"

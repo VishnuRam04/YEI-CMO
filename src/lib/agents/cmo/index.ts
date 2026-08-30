@@ -45,10 +45,11 @@ import {
   type StrategistPayload,
   type StrategistResult,
 } from "@/lib/agents/strategist/schema";
+import { computeCost } from "@/lib/agents/cost";
 import { model, MODELS } from "@/lib/agents/models";
 import { agentFailure, agentSuccess } from "@/lib/agents/output";
 import { runAgent } from "@/lib/agents/run";
-import type { Agent, AgentInput } from "@/lib/agents/types";
+import type { Agent, AgentInput, AgentTelemetry } from "@/lib/agents/types";
 import { getDb } from "@/lib/db";
 import {
   buildSystemPrompt,
@@ -394,12 +395,28 @@ function dateRange(
   };
 }
 
+
+/** What one CMO turn cost, across the loop and every specialist it ran. */
+export interface TurnSpend {
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+}
+
+function addSpend(spend: TurnSpend, output: { telemetry?: AgentTelemetry }): void {
+  if (!output.telemetry) return;
+  spend.inputTokens += output.telemetry.inputTokens || 0;
+  spend.outputTokens += output.telemetry.outputTokens || 0;
+  spend.costUsd += output.telemetry.costUsd || 0;
+}
+
 async function runStrategyPipeline(
   plan: CmoDecision["delegations"][number],
   input: AgentInput<CmoPayload>,
   activeDirective: string | undefined,
   kernel: unknown,
   conversationId: string,
+  spend: TurnSpend,
 ): Promise<WorkerHandoff[]> {
   const productSelectors = catalogueBackedSelectors(
     explicitProductSelectors(plan.instruction, plan.products),
@@ -421,6 +438,7 @@ async function runStrategyPipeline(
     traceId: `${input.traceId}-intel`,
     payload: intelligencePayload,
   });
+  addSpend(spend, intelligence);
   if (!intelligence.ok || !intelligence.result) {
     emitCmoDevTrace(input.traceId, {
       agentId: "analyst",
@@ -478,6 +496,7 @@ async function runStrategyPipeline(
     traceId: `${input.traceId}-strategy`,
     payload: strategyPayload,
   });
+  addSpend(spend, strategy);
   if (!strategy.ok || !strategy.result) {
     emitCmoDevTrace(input.traceId, {
       agentId: "strategist",
@@ -534,6 +553,7 @@ async function delegate(
   plan: CmoDecision["delegations"][number],
   input: AgentInput<CmoPayload>,
   brandUrl: string,
+  spend: TurnSpend,
 ): Promise<WorkerHandoff> {
   if (plan.agentId === "brand-analyst") {
     const url = plan.url || brandUrl;
@@ -557,6 +577,7 @@ async function delegate(
       detail: { input: payload },
     });
     const output = await runAgent(brandAnalystAgent, { ...input, payload });
+  addSpend(spend, output);
     if (!output.ok || !output.result) {
       emitCmoDevTrace(input.traceId, {
         agentId: "brand-analyst",
@@ -603,6 +624,7 @@ async function delegate(
       detail: { input: payload },
     });
     const output = await runAgent(copywriterAgent, { ...input, payload });
+  addSpend(spend, output);
     emitCmoDevTrace(input.traceId, {
       agentId: "copywriter",
       stage: "content",
@@ -663,6 +685,7 @@ async function delegate(
       traceId: `${input.traceId}-critic`,
       payload,
     });
+  addSpend(spend, output);
     emitCmoDevTrace(input.traceId, {
       agentId: "campaign-critic",
       stage: plan.reviewMode,
@@ -691,6 +714,7 @@ async function delegate(
     detail: { input: payload },
   });
   const output = await runAgent(analystAgent, { ...input, payload });
+  addSpend(spend, output);
   emitCmoDevTrace(input.traceId, {
     agentId: "analyst",
     stage: "performance",
@@ -782,6 +806,8 @@ export const cmoAgent: Agent<CmoPayload, CmoResult> = {
         },
       });
       const workerHandoffs: WorkerHandoff[] = [];
+      // Every model call this turn adds to one running total.
+      const spend: TurnSpend = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
       let effectiveMessage = input.payload.message;
       const skippedClarification = Boolean(
         pendingClarification &&
@@ -826,6 +852,7 @@ export const cmoAgent: Agent<CmoPayload, CmoResult> = {
             ...input,
             payload: clarificationPayload,
           });
+  addSpend(spend, confirmation);
           if (!confirmation.ok) {
             return agentFailure({
               agentId: "cmo",
@@ -889,6 +916,8 @@ export const cmoAgent: Agent<CmoPayload, CmoResult> = {
             presentation: "conversation",
             intent: "chat",
             delegations: [],
+            // A canned greeting makes no model call, so it costs nothing.
+            spend: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
           },
           summary: "chat",
           inputTokens: 0,
@@ -1043,10 +1072,11 @@ export const cmoAgent: Agent<CmoPayload, CmoResult> = {
             brand.directives[0]?.statement,
             brand.kernel,
             conversationId,
+            spend,
           ));
         } else {
           if (capability!.id === "campaign-critic") intent = "review-campaign";
-          workerHandoffs.push(await delegate(plan, input, brand.url));
+          workerHandoffs.push(await delegate(plan, input, brand.url, spend));
         }
         used.push(capability!.id);
 
@@ -1185,6 +1215,11 @@ export const cmoAgent: Agent<CmoPayload, CmoResult> = {
           presentation: "brief",
           intent,
           delegations,
+          spend: {
+            inputTokens: spend.inputTokens + inputTokens,
+            outputTokens: spend.outputTokens + outputTokens,
+            costUsd: spend.costUsd + computeCost(MODELS.cmo, inputTokens, outputTokens),
+          },
         },
         summary: used.length > 0
           ? `${used.length} step${used.length === 1 ? "" : "s"}: ${used.join(" -> ")}`
