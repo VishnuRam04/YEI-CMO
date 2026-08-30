@@ -980,16 +980,16 @@ export function CmoChatPanel({
           <Send size={15} />
         </button>
         <small>Enter to send · Shift + Enter for a new line</small>
-        {spend.inputTokens + spend.outputTokens > 0 && (
-          <small
-            className="cmo-spend"
-            title={`${spend.inputTokens.toLocaleString("en-GB")} in · ${spend.outputTokens.toLocaleString("en-GB")} out · estimated at RM${MYR_PER_USD} to the US dollar`}
-          >
-            {thousandsOfTokens(spend.inputTokens + spend.outputTokens)} tokens
-            {" · est. "}
-            <b>{ringgit(spend.costUsd)}</b>
-          </small>
-        )}
+        {/* Always shown, including at zero: a greeting is answered without a
+            model call, and hiding the counter then reads as broken. */}
+        <small
+          className="cmo-spend"
+          title={`${spend.inputTokens.toLocaleString("en-GB")} in · ${spend.outputTokens.toLocaleString("en-GB")} out · estimated at RM${MYR_PER_USD} to the US dollar`}
+        >
+          {thousandsOfTokens(spend.inputTokens + spend.outputTokens)} tokens
+          {" · est. "}
+          <b>{ringgit(spend.costUsd)}</b>
+        </small>
       </form>
     </aside>
   );
