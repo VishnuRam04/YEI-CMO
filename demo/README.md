@@ -42,3 +42,41 @@ Totals: 3.11m impressions · 76.8k clicks · RM6,933 spend · 3,730 conversions.
 
 Regenerate or reshape it by editing the `mixes` table in the generator commit —
 the seed is fixed, so the same numbers come out every time.
+
+
+---
+
+## `raw-cosmetics-catalogue.xlsx`
+
+Product catalogue for the onboarding **Products** step. Ten products, validated
+through the real parser: 10 products, no warnings.
+
+### Required
+
+Only **Product Name** is truly required — the header row is found by looking for
+it. Without a **Price** column the sheet still imports, but every product lands
+without pricing and the Brand Analyst raises a gap.
+
+### Accepted column headers
+
+Matching ignores case, underscores and hyphens, so `product_name` and
+`Product Name` are the same. Any one of the alternatives works.
+
+| Field | Accepted headers |
+|---|---|
+| **Product Name** *(required)* | `product`, `product name`, `name`, `item`, `item name`, `title` |
+| Price | `price`, `selling price`, `sale price`, `retail price`, `unit price`, `msrp`, `rrp` |
+| SKU | `sku`, `product id`, `product code`, `item code`, `code` |
+| Category | `category`, `product category`, `collection`, `product type` |
+| Description | `description`, `product description`, `details`, `summary` |
+| Currency | `currency`, `currency code` |
+| Compare at price | `compare at price`, `compare-at price`, `original price`, `list price`, `regular price` |
+| Availability | `availability`, `stock`, `stock status`, `inventory status`, `status` |
+| URL | `url`, `link`, `product url`, `product link`, `page url` |
+
+### Limits
+
+- Real `.xlsx` only — not `.xls`, not `.csv` renamed
+- Header row must appear within the first **20 rows**
+- Up to **1,000 products**, **50 columns**
+- Every worksheet is read; sheets without a name column are skipped with a warning
