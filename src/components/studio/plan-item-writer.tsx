@@ -1,7 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Clapperboard, Copy, ImageIcon, LoaderCircle, RefreshCw, Sparkles } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  Clapperboard,
+  Copy,
+  ImageIcon,
+  LoaderCircle,
+  RefreshCw,
+  Sparkles,
+} from "lucide-react";
 import type {
   BrandAuditReport,
   Channel,
@@ -10,47 +19,16 @@ import type {
 } from "@/lib/agents/copywriter/schema";
 
 const BLANK_LINE = String.fromCharCode(10, 10);
+const NEWLINE = String.fromCharCode(10);
 
-type ImageState = {
-  url: string;
-  mimeType: string;
-} | null;
+type ImageState = { url: string; mimeType: string } | null;
+type Tab = "post" | "poster" | "script";
 
 const angleLabels: Record<string, string> = {
   "pain-led": "Starts with the worry",
   "proof-led": "Starts with the proof",
   "contrarian": "Challenges the usual advice",
 };
-
-/** Reads the agent route's NDJSON stream and returns the final result. */
-async function runAgentRoute<T>(body: unknown): Promise<T> {
-  const response = await fetch("/api/generate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const text = await response.text();
-  let result: T | null = null;
-  let failure = "";
-  for (const line of text.split("\n")) {
-    if (!line.trim()) continue;
-    let event: {
-      type?: string;
-      output?: { result?: T };
-      error?: { message?: string };
-    };
-    try {
-      event = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (event.type === "done" && event.output?.result) result = event.output.result;
-    if (event.type === "error") failure = event.error?.message ?? "The Copywriter failed.";
-  }
-  if (result) return result;
-  throw new Error(failure || "The Copywriter returned nothing to use.");
-}
-
 
 const criterionLabels: Record<string, string> = {
   voice: "Voice",
@@ -65,15 +43,47 @@ const criterionLabels: Record<string, string> = {
   spelling: "Spelling",
 };
 
-function ScoreCard({ title, audit }: { title: string; audit: BrandAuditReport }) {
+/** Reads the agent route's NDJSON stream and returns the final result. */
+async function runAgentRoute<T>(body: unknown): Promise<T> {
+  const response = await fetch("/api/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const text = await response.text();
+  let result: T | null = null;
+  let failure = "";
+  for (const line of text.split(NEWLINE)) {
+    if (!line.trim()) continue;
+    let event: { type?: string; output?: { result?: T }; error?: { message?: string } };
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (event.type === "done" && event.output?.result) result = event.output.result;
+    if (event.type === "error") failure = event.error?.message ?? "The Copywriter failed.";
+  }
+  if (result) return result;
+  throw new Error(failure || "The Copywriter returned nothing to use.");
+}
+
+/**
+ * The verdict is a headline number with the working folded away. Seven scored
+ * rows under every draft turned the page into a wall to scroll past.
+ */
+function ScoreCard({ audit }: { audit: BrandAuditReport }) {
+  const failing = audit.criteria.filter((criterion) => !criterion.passed);
   return (
-    <section className="score-card">
-      <header>
-        <span>{title}</span>
+    <details className="score-card">
+      <summary>
+        <span>Brand judge</span>
         <b className={audit.passed ? "pass" : "fail"}>
           {audit.overallScore}<small>/100</small>
         </b>
-      </header>
+        {failing.length > 0 && <em>{failing.length} to check</em>}
+        <ChevronDown size={13} />
+      </summary>
       <div className="score-list">
         {audit.criteria.map((criterion) => (
           <div
@@ -92,7 +102,7 @@ function ScoreCard({ title, audit }: { title: string; audit: BrandAuditReport })
       {!audit.passed && audit.notes.length > 0 && (
         <p className="score-warning">{audit.notes[audit.notes.length - 1]}</p>
       )}
-    </section>
+    </details>
   );
 }
 
@@ -126,15 +136,18 @@ export function PlanItemWriter({
   const [script, setScript] = useState<ScriptGenerationResult | null>(null);
   const [scriptStatus, setScriptStatus] = useState<"idle" | "working">("idle");
   const [scriptError, setScriptError] = useState("");
+  const [tab, setTab] = useState<Tab>("post");
 
   async function write() {
     setTextStatus("working");
     setTextError("");
+    setTab("post");
     try {
-      const result = await runAgentRoute<{ kind: "text"; variants: TextVariant[]; brandAudit?: BrandAuditReport[] }>({
-        brandId,
-        payload: { mode: "text", channel, brief },
-      });
+      const result = await runAgentRoute<{
+        kind: "text";
+        variants: TextVariant[];
+        brandAudit?: BrandAuditReport[];
+      }>({ brandId, payload: { mode: "text", channel, brief } });
       setVariants(result.variants);
       setBrandAudit(result.brandAudit ?? []);
       setSelected(0);
@@ -151,6 +164,7 @@ export function PlanItemWriter({
     setImageStatus("working");
     setImageError("");
     setPosterAudit(null);
+    setTab("poster");
     try {
       // The Copywriter compresses the chosen caption into poster wording, so
       // the artwork says the same thing in far fewer words.
@@ -161,11 +175,7 @@ export function PlanItemWriter({
         brandAudit?: BrandAuditReport[];
       }>({
         brandId,
-        payload: {
-          mode: "image",
-          briefText: imageBrief,
-          posterSource: chosen.body,
-        },
+        payload: { mode: "image", briefText: imageBrief, posterSource: chosen.body },
       });
       setImage({ url: result.imageUrl, mimeType: result.mimeType });
       setPosterAudit(result.brandAudit?.[0] ?? null);
@@ -179,6 +189,7 @@ export function PlanItemWriter({
   async function writeScript() {
     setScriptStatus("working");
     setScriptError("");
+    setTab("script");
     try {
       setScript(await runAgentRoute<ScriptGenerationResult>({
         brandId,
@@ -201,15 +212,35 @@ export function PlanItemWriter({
     }
   }
 
-  function variantText(variant: TextVariant): string {
+  function variantText(entry: TextVariant): string {
     return [
-      variant.subject ? `Subject: ${variant.subject}` : "",
-      variant.preheader ? `Preheader: ${variant.preheader}` : "",
-      variant.body,
-      variant.hashtags?.length ? variant.hashtags.join(" ") : "",
-    ].filter(Boolean).join("\n\n");
+      entry.subject ? `Subject: ${entry.subject}` : "",
+      entry.preheader ? `Preheader: ${entry.preheader}` : "",
+      entry.body,
+      entry.hashtags?.length ? entry.hashtags.join(" ") : "",
+    ].filter(Boolean).join(BLANK_LINE);
   }
 
+  function scriptText(value: ScriptGenerationResult): string {
+    return [
+      `HOOK: ${value.hook}`,
+      ...value.scenes.map((scene, index) =>
+        `${index + 1}. (${scene.seconds}s) ${scene.shot}${NEWLINE}   Action: ${scene.action}${NEWLINE}   Say/show: ${scene.saidOrShown}`),
+      `CALL TO ACTION: ${value.callToAction}`,
+      value.shoppingList.length ? `BEFORE YOU FILM: ${value.shoppingList.join(", ")}` : "",
+    ].filter(Boolean).join(BLANK_LINE);
+  }
+
+  const variant = variants[selected];
+  const variantAudit = brandAudit.find((audit) => audit.angle === variant?.angle);
+  const busy = textStatus === "working" || imageStatus === "working" || scriptStatus === "working";
+  const tabs: Array<{ id: Tab; label: string; ready: boolean }> = [
+    { id: "post", label: "Post", ready: variants.length > 0 },
+    { id: "poster", label: "Poster", ready: Boolean(image || imageError) },
+    ...(needsScript
+      ? [{ id: "script" as Tab, label: "Script", ready: Boolean(script || scriptError) }]
+      : []),
+  ];
 
   return (
     <section className="writer">
@@ -218,7 +249,7 @@ export function PlanItemWriter({
           type="button"
           className="button button-dark"
           onClick={() => void write()}
-          disabled={textStatus === "working"}
+          disabled={busy}
         >
           {textStatus === "working"
             ? <><LoaderCircle size={13} /> Writing…</>
@@ -230,10 +261,8 @@ export function PlanItemWriter({
           type="button"
           className="button button-ghost"
           onClick={() => void makeImage()}
-          disabled={imageStatus === "working" || variants.length === 0}
-          title={variants.length === 0
-            ? "Write the post first so the poster can carry its words"
-            : undefined}
+          disabled={busy || variants.length === 0}
+          title={variants.length === 0 ? "Write the post first" : undefined}
         >
           {imageStatus === "working"
             ? <><LoaderCircle size={13} /> Making the poster…</>
@@ -244,7 +273,7 @@ export function PlanItemWriter({
             type="button"
             className="button button-ghost"
             onClick={() => void writeScript()}
-            disabled={scriptStatus === "working"}
+            disabled={busy}
           >
             {scriptStatus === "working"
               ? <><LoaderCircle size={13} /> Writing the script…</>
@@ -253,141 +282,137 @@ export function PlanItemWriter({
         )}
       </div>
 
-      {needsScript && (
+      {(needsScript || channelNote) && (
         <p className="writer-note">
-          The plan asks for a video here, so you can also get a shot-by-shot
-          script to film from.
+          {needsScript && "The plan asks for a video here, so a shot-by-shot script is available. "}
+          {channelNote}
         </p>
       )}
-      {channelNote && <p className="writer-note">{channelNote}</p>}
-      {textError && <p className="writer-error">{textError}</p>}
 
       {variants.length === 0 && textStatus === "idle" && !textError && (
         <div className="writer-empty">
           <Sparkles size={17} />
           <p>
-            The Copywriter writes three versions of this exact post from the
-            plan — one starting with the worry, one with the proof, and one that
-            challenges the usual advice. Pick the one that sounds like you, then
-            make a poster that carries its words in your brand colours.
+            The Copywriter writes three versions of this post from the plan, then
+            a poster carrying its words in your brand colours. Everything is
+            checked against Brand Memory before you see it.
           </p>
         </div>
       )}
 
-      {variants.length > 0 && (
-        <div className="writer-variants">
-          {variants.map((variant, index) => (
-            <article
-              key={variant.angle}
-              className={`card variant-card ${selected === index ? "selected" : ""}`}
+      {textError && <p className="writer-error">{textError}</p>}
+
+      {tabs.some((entry) => entry.ready) && (
+        <div className="writer-tabs" role="tablist">
+          {tabs.map((entry) => (
+            <button
+              key={entry.id}
+              type="button"
+              role="tab"
+              aria-selected={tab === entry.id}
+              className={tab === entry.id ? "active" : ""}
+              onClick={() => setTab(entry.id)}
+              disabled={!entry.ready}
             >
-              <div className="variant-top">
-                <div>
-                  <div className="variant-angle">Version {String.fromCharCode(65 + index)}</div>
-                  <span className={`tag ${selected === index ? "tag-lime" : ""}`} style={{ marginTop: 7 }}>
-                    {angleLabels[variant.angle] ?? variant.angle}
-                  </span>
-                </div>
-              </div>
-              {variant.subject && (
-                <div className="writer-subject">
-                  <b>Subject</b>{variant.subject}
-                </div>
-              )}
-              <div className="post-copy">{variant.body}</div>
-              {variant.hashtags && variant.hashtags.length > 0 && (
-                <div className="writer-hashtags">{variant.hashtags.join(" ")}</div>
-              )}
-              {(() => {
-                const audit = brandAudit.find((item) => item.angle === variant.angle);
-                if (!audit) return null;
-                return (
-                  <ScoreCard title="Brand judge" audit={audit} />
-                );
-              })()}
-              <div className="variant-actions">
-                <button
-                  type="button"
-                  className={`button ${selected === index ? "button-primary" : "button-ghost"}`}
-                  style={{ flex: 1 }}
-                  onClick={() => setSelected(index)}
-                >
-                  {selected === index ? <><Check size={12} /> Using this</> : "Use this"}
-                </button>
-                <button
-                  type="button"
-                  className="button button-ghost icon-button"
-                  aria-label="Copy this version"
-                  onClick={() => void copy(variantText(variant), index)}
-                >
-                  {copied === index ? <Check size={13} /> : <Copy size={13} />}
-                </button>
-              </div>
-            </article>
+              {entry.label}
+            </button>
           ))}
         </div>
       )}
 
+      {tab === "post" && variant && (
+        <div className="writer-panel">
+          <div className="version-pills">
+            {variants.map((entry, index) => {
+              const audit = brandAudit.find((item) => item.angle === entry.angle);
+              return (
+                <button
+                  key={entry.angle}
+                  type="button"
+                  className={selected === index ? "active" : ""}
+                  onClick={() => setSelected(index)}
+                >
+                  <b>{angleLabels[entry.angle] ?? entry.angle}</b>
+                  {audit && <em>{audit.overallScore}</em>}
+                </button>
+              );
+            })}
+          </div>
 
-      {scriptError && <p className="writer-error">{scriptError}</p>}
-      {script && (
-        <section className="script-card">
-          <header>
-            <span>Video script · about {script.totalSeconds}s</span>
+          {variant.subject && (
+            <div className="writer-subject"><b>Subject</b>{variant.subject}</div>
+          )}
+          <div className="post-copy">{variant.body}</div>
+          {variant.hashtags && variant.hashtags.length > 0 && (
+            <div className="writer-hashtags">{variant.hashtags.join(" ")}</div>
+          )}
+
+          <div className="panel-actions">
             <button
               type="button"
-              className="button button-ghost icon-button"
-              aria-label="Copy the script"
-              onClick={() => void copy(
-                [
-                  `HOOK: ${script.hook}`,
-                  ...script.scenes.map((scene, index) =>
-                    `${index + 1}. (${scene.seconds}s) ${scene.shot}
-   Action: ${scene.action}
-   Say/show: ${scene.saidOrShown}`),
-                  `CALL TO ACTION: ${script.callToAction}`,
-                  script.shoppingList.length ? `BEFORE YOU FILM: ${script.shoppingList.join(", ")}` : "",
-                ].filter(Boolean).join(BLANK_LINE),
-                -2,
-              )}
+              className="button button-ghost"
+              onClick={() => void copy(variantText(variant), selected)}
             >
-              {copied === -2 ? <Check size={13} /> : <Copy size={13} />}
+              {copied === selected
+                ? <><Check size={13} /> Copied</>
+                : <><Copy size={13} /> Copy this version</>}
             </button>
-          </header>
-          <p className="script-hook">{script.hook}</p>
-          <ol className="script-scenes">
-            {script.scenes.map((scene, index) => (
-              <li key={index}>
-                <b>{scene.seconds}s · {scene.shot}</b>
-                <span>{scene.action}</span>
-                <em>&ldquo;{scene.saidOrShown}&rdquo;</em>
-              </li>
-            ))}
-          </ol>
-          <p className="script-cta">{script.callToAction}</p>
-          {script.shoppingList.length > 0 && (
-            <p className="script-list">
-              <b>Before you film:</b> {script.shoppingList.join(" · ")}
-            </p>
-          )}
-          {script.brandAudit?.[0] && (
-            <ScoreCard title="Brand judge · script" audit={script.brandAudit[0]} />
-          )}
-        </section>
+          </div>
+
+          {variantAudit && <ScoreCard audit={variantAudit} />}
+        </div>
       )}
 
-      {(image || imageError) && (
-        <div className="writer-image">
-          <div className="kernel-field-label">Poster</div>
+      {tab === "poster" && (image || imageError) && (
+        <div className="writer-panel">
           {imageError
             ? <p className="writer-error">{imageError}</p>
             : image && (
-              // The generated file is served from blob storage, so a plain img
+              // Served from blob storage or the media route, so a plain img
               // keeps this independent of the Next image loader's host config.
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={image.url} alt="Generated campaign image" />
+              <img className="poster-image" src={image.url} alt="Generated campaign poster" />
             )}
-          {posterAudit && <ScoreCard title="Brand judge · poster" audit={posterAudit} />}
+          {posterAudit && <ScoreCard audit={posterAudit} />}
+        </div>
+      )}
+
+      {tab === "script" && (script || scriptError) && (
+        <div className="writer-panel">
+          {scriptError && <p className="writer-error">{scriptError}</p>}
+          {script && (
+            <>
+              <div className="script-head">
+                <span>About {script.totalSeconds} seconds · {script.scenes.length} shots</span>
+                <button
+                  type="button"
+                  className="button button-ghost"
+                  onClick={() => void copy(scriptText(script), -2)}
+                >
+                  {copied === -2
+                    ? <><Check size={13} /> Copied</>
+                    : <><Copy size={13} /> Copy script</>}
+                </button>
+              </div>
+              <p className="script-hook">{script.hook}</p>
+              <ol className="script-scenes">
+                {script.scenes.map((scene, index) => (
+                  <li key={index}>
+                    <b>{scene.seconds}s · {scene.shot}</b>
+                    <span>{scene.action}</span>
+                    <em>&ldquo;{scene.saidOrShown}&rdquo;</em>
+                  </li>
+                ))}
+              </ol>
+              <p className="script-cta">{script.callToAction}</p>
+              {script.shoppingList.length > 0 && (
+                <p className="script-list">
+                  <b>Before you film:</b> {script.shoppingList.join(" · ")}
+                </p>
+              )}
+              {script.brandAudit?.[0] && <ScoreCard audit={script.brandAudit[0]} />}
+            </>
+          )}
         </div>
       )}
     </section>
