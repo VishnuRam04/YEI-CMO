@@ -1,4 +1,4 @@
-import { generateText, Output } from "ai";
+import { generateText, NoObjectGeneratedError, Output } from "ai";
 import { ZodError } from "zod";
 import { analystAgent } from "@/lib/agents/analyst";
 import {
@@ -28,6 +28,19 @@ import type { CopywriterPayload } from "@/lib/agents/copywriter/schema";
 import { strategistAgent } from "@/lib/agents/strategist";
 import { saveProposedCampaign } from "@/lib/campaign/store";
 import {
+  buildLoopSystemPrompt,
+  buildLoopUserPrompt,
+  decisionProblem,
+  LoopDecisionSchema,
+  MAX_LOOP_STEPS,
+  type LoopDecision,
+  type LoopObservation,
+} from "./loop";
+import {
+  CapabilityCallArgsSchema,
+  findCapability,
+} from "./registry";
+import {
   StrategistResultSchema,
   type StrategistPayload,
   type StrategistResult,
@@ -38,9 +51,7 @@ import { runAgent } from "@/lib/agents/run";
 import type { Agent, AgentInput } from "@/lib/agents/types";
 import { getDb } from "@/lib/db";
 import {
-  buildSynthesisPrompt,
   buildSystemPrompt,
-  buildUserPrompt,
   conversationalResponse,
   formatCmoResponse,
 } from "./prompt";
@@ -52,8 +63,6 @@ import {
   saveCmoExchange,
 } from "./memory";
 import {
-  CmoDecisionSchema,
-  CmoSynthesisSchema,
   type CmoDecision,
   type CmoPayload,
   type CmoResponse,
@@ -268,79 +277,6 @@ function campaignResponseFromHandoffs(handoffs: WorkerHandoff[]): CmoResponse | 
     planOffer: false,
     nextStep: review.recommendations[0].action,
   };
-}
-
-function deterministicCampaignReviewDecision(message: string): CmoDecision | null {
-  const explicitReview = /\b(?:review|audit|critique|critic|readiness check|pre[ -]?flight|post[ -]?flight|assess)\b/i.test(message) &&
-    /\bcampaign\b/i.test(message);
-  if (!explicitReview) return null;
-  const reviewMode = /\b(?:post[ -]?flight|results?|performance|after launch|completed|ended)\b/i.test(message)
-    ? "postflight" as const
-    : "preflight" as const;
-  const campaignId = message.match(/\bcampaign(?:\s+id)?\s*[:#]\s*([a-zA-Z0-9_-]{8,160})\b/i)?.[1] ?? "";
-  return CmoDecisionSchema.parse({
-    intent: "review-campaign",
-    response: {
-      title: reviewMode === "preflight" ? "Campaign review in progress" : "Campaign results review in progress",
-      executiveSummary: reviewMode === "preflight"
-        ? "I’m checking the latest saved campaign for launch blockers."
-        : "I’m comparing the latest saved campaign results with its original hypothesis.",
-      keyPoints: [],
-      options: [],
-      recommendation: "",
-      planOffer: false,
-      nextStep: "Review the Campaign Critic verdict and highest-priority action.",
-    },
-    delegations: [{
-      agentId: "campaign-critic",
-      instruction: message,
-      url: "",
-      channel: "none",
-      from: "",
-      to: "",
-      products: [],
-      topics: [],
-      horizon: "sprint",
-      campaignId,
-      reviewMode,
-    }],
-  });
-}
-
-function deterministicStrategyDecision(message: string): CmoDecision | null {
-  // Only an outright request for the plan short-circuits the model. Advice
-  // seeking ("should we...", "is this a good idea") stays conversational so
-  // the idea can be talked through before anything is planned.
-  if (!explicitPlanRequest(message)) {
-    return null;
-  }
-  const channel = ["linkedin", "instagram", "email"].find((candidate) =>
-    new RegExp(`\\b${candidate}\\b`, "i").test(message)) ?? "none";
-  return CmoDecisionSchema.parse({
-    intent: "strategize",
-    response: {
-      title: "Strategy in progress",
-      executiveSummary: "I’m refreshing the evidence before setting the strategic direction.",
-      keyPoints: [],
-      options: [],
-      recommendation: "",
-      planOffer: false,
-      nextStep: "Review the proposed sprint before content production begins.",
-    },
-    delegations: [{
-      agentId: "strategist",
-      instruction: message,
-      url: "",
-      channel,
-      from: "",
-      to: "",
-      products: [],
-      topics: [],
-      horizon: /\b(?:quarter|quarterly|90[ -]?day)\b/i.test(message)
-        ? "quarter"
-        : "sprint",
-    }],
-  });
 }
 
 function canonicalSelector(value: string): string {
@@ -976,130 +912,187 @@ export const cmoAgent: Agent<CmoPayload, CmoResult> = {
         status: "working",
         detail: { message: effectiveMessage },
       });
-      const deterministicDecision = pendingClarification
-        ? null
-        : deterministicCampaignReviewDecision(effectiveMessage) ??
-          deterministicStrategyDecision(effectiveMessage);
-      const decisionCall = deterministicDecision
-        ? null
-        : await generateText({
+      // The CMO acts one step at a time: decide, run, observe, decide again.
+      // Nothing is committed up front, so an empty research result or a
+      // refused call changes what happens next instead of being ignored.
+      const loopSystem = buildLoopSystemPrompt(system);
+      const observations: LoopObservation[] = [];
+      const used: string[] = [];
+      let response: CmoResponse | null = null;
+      let askedQuestion = "";
+      let inputTokens = 0;
+      let outputTokens = 0;
+      let intent: CmoDecision["intent"] = "chat";
+
+      for (let step = 1; step <= MAX_LOOP_STEPS + 2; step += 1) {
+        const stepsLeft = MAX_LOOP_STEPS - used.length;
+        let decision: LoopDecision;
+        try {
+          const call = await generateText({
             model: model(MODELS.cmo),
-            system,
-            prompt: buildUserPrompt(effectiveMessage, recentActivity),
-            output: Output.object({ schema: CmoDecisionSchema }),
-            maxOutputTokens: 1_200,
-            providerOptions: {
-              google: { thinkingConfig: { thinkingLevel: "low" } },
-            },
+            system: loopSystem,
+            prompt: buildLoopUserPrompt({
+              message: effectiveMessage,
+              recentActivity,
+              observations,
+              stepsLeft,
+            }),
+            output: Output.object({ schema: LoopDecisionSchema }),
+            maxOutputTokens: 3_000,
+            providerOptions: { google: { thinkingConfig: { thinkingLevel: "low" } } },
           });
-      const decision = deterministicDecision ?? CmoDecisionSchema.parse(decisionCall?.output);
-      emitCmoDevTrace(input.traceId, {
-        agentId: "cmo",
-        stage: "routing",
-        label: "Specialist route selected",
-        status: "completed",
-        detail: {
-          intent: decision.intent,
-          deterministic: Boolean(deterministicDecision),
-          delegations: decision.delegations,
-        },
-      });
-      // Prompt adherence drifts, so the gate is enforced here too: without
-      // approval a strategist delegation is dropped and the conversational
-      // reply the model wrote alongside it stands on its own.
-      const gatedPlans = planApproved
-        ? decision.delegations
-        : decision.delegations.filter((plan) => plan.agentId !== "strategist");
-      const requestedPlans = gatedPlans.slice(0, MAX_DELEGATIONS);
-      const hasStrategy = requestedPlans.some((plan) => plan.agentId === "strategist");
-      const plans = hasStrategy
-        ? requestedPlans.filter((plan) => plan.agentId !== "analyst" && plan.agentId !== "copywriter")
-        : requestedPlans;
-
-      // If the model tried to plan anyway, its reply is usually a routing
-      // stub. Turn it into an explicit offer so the turn still ends somewhere.
-      const strategyGated = !planApproved &&
-        decision.delegations.some((plan) => plan.agentId === "strategist");
-      let response: CmoResponse = strategyGated
-        ? {
-            ...decision.response,
-            options: [],
-            executionPlan: undefined,
-            planOffer: true,
-            nextStep: "Want me to build the full plan for this?",
-          }
-        : decision.response;
-      let inputTokens = decisionCall?.usage.inputTokens ?? 0;
-      let outputTokens = decisionCall?.usage.outputTokens ?? 0;
-
-      if (plans.length > 0) {
-        for (const plan of plans) {
-          if (plan.agentId === "strategist") {
-            workerHandoffs.push(...await runStrategyPipeline(
-              plan,
-              input,
-              brand.directives[0]?.statement,
-              brand.kernel,
-              conversationId,
-            ));
-          } else {
-            workerHandoffs.push(await delegate(plan, input, brand.url));
-          }
+          inputTokens += call.usage.inputTokens ?? 0;
+          outputTokens += call.usage.outputTokens ?? 0;
+          decision = LoopDecisionSchema.parse(call.output);
+        } catch (error) {
+          // A malformed decision is something the loop can recover from: tell
+          // the model what went wrong and let it decide again.
+          console.error(
+            `[cmo] step ${step} decision did not parse.`,
+            NoObjectGeneratedError.isInstance(error)
+              ? { text: error.text, cause: error.cause }
+              : error,
+          );
+          observations.push({
+            step,
+            capability: "(decision)",
+            outcome: "denied",
+            summary: "Your last output did not match the required shape. Return exactly one action, and when responding include every required field of the response.",
+          });
+          continue;
         }
-      }
 
-      if (workerHandoffs.length > 0) {
-        const strategyResponse = hasStrategy
-          ? strategyResponseFromHandoffs(workerHandoffs)
-          : null;
-        if (strategyResponse) {
-          response = strategyResponse;
-        } else if (hasStrategy) {
-          response = strategyFailureResponseFromHandoffs(workerHandoffs) ?? response;
-        } else if (decision.intent === "review-campaign") {
-          response = campaignResponseFromHandoffs(workerHandoffs) ?? response;
+        // The instruction for a capability is the user's request unless the
+        // model narrowed it, so a missing one is filled rather than refused.
+        if (decision.action === "use" && !decision.args?.instruction) {
+          decision = {
+            ...decision,
+            args: { ...(decision.args ?? {}), instruction: effectiveMessage },
+          } as LoopDecision;
+        }
+        const malformed = decisionProblem(decision);
+        if (malformed) {
+          observations.push({ step, capability: "(decision)", outcome: "denied", summary: malformed });
+          continue;
+        }
+
+        if (decision.action === "respond") {
+          response = decision.response as CmoResponse;
+          break;
+        }
+        if (decision.action === "ask") {
+          askedQuestion = decision.question ?? "";
+          intent = "clarify";
+          break;
+        }
+
+        const capability = findCapability(decision.capability ?? "");
+        const args = CapabilityCallArgsSchema.parse(decision.args ?? {});
+        emitCmoDevTrace(input.traceId, {
+          agentId: "cmo",
+          stage: "routing",
+          label: `Step ${step}: ${capability?.title ?? decision.capability}`,
+          status: "working",
+          detail: { reasoning: decision.reasoning, capability: decision.capability, args },
+        });
+
+        // A refusal is handed back as an observation, so the model can pick a
+        // different action rather than having its intent silently dropped.
+        const denial = !capability
+          ? `There is no capability called "${decision.capability}".`
+          : stepsLeft <= 0
+            ? "No specialist calls remain this turn; ask or respond now."
+            : capability.guard?.({ planApproved, used, args }) ?? null;
+        if (denial) {
+          observations.push({
+            step,
+            capability: decision.capability ?? "(unknown)",
+            outcome: "denied",
+            summary: denial,
+          });
+          emitCmoDevTrace(input.traceId, {
+            agentId: "cmo",
+            stage: "routing",
+            label: `Step ${step} refused: ${denial}`,
+            status: "failed",
+            detail: { capability: decision.capability },
+          });
+          continue;
+        }
+
+        const plan = {
+          agentId: capability!.id as WorkerHandoff["agentId"],
+          instruction: args.instruction,
+          url: args.url,
+          channel: args.channel,
+          from: args.from,
+          to: args.to,
+          products: args.products,
+          topics: args.topics,
+          horizon: args.horizon,
+          campaignId: args.campaignId,
+          reviewMode: args.reviewMode,
+        } as CmoDecision["delegations"][number];
+
+        const before = workerHandoffs.length;
+        if (capability!.id === "strategist") {
+          intent = "strategize";
+          workerHandoffs.push(...await runStrategyPipeline(
+            plan,
+            input,
+            brand.directives[0]?.statement,
+            brand.kernel,
+            conversationId,
+          ));
         } else {
-          emitCmoDevTrace(input.traceId, {
-            agentId: "cmo",
-            stage: "synthesis",
-            label: "Synthesising specialist handoffs into a CMO briefing",
-            status: "working",
-            detail: {
-              handoffs: workerHandoffs.map((handoff) => ({
-                agentId: handoff.agentId,
-                status: handoff.status,
-                summary: handoff.summary,
-              })),
-            },
-          });
-          const synthesisCall = await generateText({
-            model: model(MODELS.cmo),
-            system,
-            prompt: buildSynthesisPrompt(
-              effectiveMessage,
-              decision.response,
-              workerHandoffs,
-            ),
-            output: Output.object({ schema: CmoSynthesisSchema }),
-            maxOutputTokens: 1_200,
-            providerOptions: {
-              google: { thinkingConfig: { thinkingLevel: "low" } },
-            },
-          });
-          response = CmoSynthesisSchema.parse(synthesisCall.output).response;
-          inputTokens += synthesisCall.usage.inputTokens ?? 0;
-          outputTokens += synthesisCall.usage.outputTokens ?? 0;
-          emitCmoDevTrace(input.traceId, {
-            agentId: "cmo",
-            stage: "synthesis",
-            label: "CMO briefing synthesised",
-            status: "completed",
-            detail: { response },
-          });
+          if (capability!.id === "campaign-critic") intent = "review-campaign";
+          workerHandoffs.push(await delegate(plan, input, brand.url));
+        }
+        used.push(capability!.id);
+
+        const produced = workerHandoffs.slice(before);
+        const worst = produced.find((handoff) => handoff.status === "failed")
+          ?? produced.find((handoff) => handoff.status === "needs-input")
+          ?? produced[produced.length - 1];
+        observations.push({
+          step,
+          capability: capability!.id,
+          outcome: worst?.status ?? "completed",
+          summary: produced.map((handoff) => `${handoff.agentId}: ${handoff.summary}`).join(" | "),
+        });
+      }
+
+      const hasStrategy = used.includes("strategist");
+      if (!response) {
+        // The loop ran out of steps without answering, or asked a question.
+        response = {
+          title: askedQuestion ? "One thing before I continue" : "Here is where I got to",
+          executiveSummary: askedQuestion
+            ? "I need one detail from you before I can go further."
+            : observations.map((observation) => observation.summary).join(" ").slice(0, 900)
+              || "I could not complete this request.",
+          keyPoints: [],
+          options: [],
+          recommendation: "",
+          planOffer: false,
+          nextStep: askedQuestion || "Tell me how you would like to proceed.",
+        };
+      }
+
+      // Special renderings only. There is no synthesis step any more: the
+      // model already saw every observation before it chose to respond, so
+      // re-summarising its own answer would only overwrite it.
+      if (workerHandoffs.length > 0) {
+        if (hasStrategy) {
+          response = strategyResponseFromHandoffs(workerHandoffs)
+            ?? strategyFailureResponseFromHandoffs(workerHandoffs)
+            ?? response;
+        } else if (intent === "review-campaign") {
+          response = campaignResponseFromHandoffs(workerHandoffs) ?? response;
         }
       }
 
-      const clarificationHandoffs = decision.intent === "clarify" &&
+      const clarificationHandoffs = intent === "clarify" &&
         !workerHandoffs.some((handoff) => handoff.informationRequests.length > 0)
         ? [{
             ...basicHandoff("brand-analyst", "needs-input", "Open brand question"),
@@ -1158,7 +1151,7 @@ export const cmoAgent: Agent<CmoPayload, CmoResult> = {
             ...workerHandoffs.map((handoff) => handoff.agentId),
             ...pendingDelegation,
           ]))
-        : [...plans.map((plan) => plan.agentId), ...pendingDelegation]
+        : [...workerHandoffs.map((handoff) => handoff.agentId), ...pendingDelegation]
       ).slice(0, MAX_DELEGATIONS);
       await saveCmoExchange({
         conversationId,
@@ -1174,9 +1167,10 @@ export const cmoAgent: Agent<CmoPayload, CmoResult> = {
         label: "CMO response ready",
         status: "completed",
         detail: {
-          intent: decision.intent,
+          intent,
           delegations,
           response,
+          steps: observations,
         },
       });
 
@@ -1189,10 +1183,12 @@ export const cmoAgent: Agent<CmoPayload, CmoResult> = {
           response,
           conversationId,
           presentation: "brief",
-          intent: decision.intent,
+          intent,
           delegations,
         },
-        summary: plans.length > 0 ? `${plans.length} delegation${plans.length === 1 ? "" : "s"}` : decision.intent,
+        summary: used.length > 0
+          ? `${used.length} step${used.length === 1 ? "" : "s"}: ${used.join(" -> ")}`
+          : intent,
         inputTokens,
         outputTokens,
       });

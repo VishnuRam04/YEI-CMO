@@ -127,7 +127,7 @@ export const CmoResponseSchema = z.object({
   clarification: CmoClarificationSchema.nullable().optional(),
 });
 
-const CmoModelResponseSchema = CmoResponseSchema.omit({ clarification: true });
+export const CmoModelResponseSchema = CmoResponseSchema.omit({ clarification: true });
 
 export const CmoResultSchema = z.object({
   reply: z.string(),
