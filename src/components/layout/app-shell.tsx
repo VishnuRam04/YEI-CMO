@@ -5,12 +5,11 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   Activity, BarChart3, BrainCircuit, CalendarDays, ChevronDown,
-  Command, LayoutDashboard, MessageCircle, ScanSearch, Sparkles,
+  Command, MessageCircle, ScanSearch, Sparkles,
 } from "lucide-react";
 import type { ReactNode } from "react";
 
 const nav = [
-  { href: "/", label: "Overview", icon: LayoutDashboard },
   { href: "/onboard", label: "Onboard", icon: ScanSearch },
   { href: "/brand", label: "Brand", icon: BrainCircuit },
   { href: "/cmo", label: "CMO", icon: MessageCircle },
