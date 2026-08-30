@@ -60,7 +60,12 @@ describe("stamping the real logo", () => {
 
   it("tells the image model to leave the corner empty and draw no mark", () => {
     const note = logoReservationNote();
-    expect(note).toContain("top-left");
+    expect(note.toLowerCase()).toContain("top-left");
     expect(note).toContain("Do not draw a logo");
+    // The model kept writing the brand name in a spare corner, which the
+    // composited mark then duplicated.
+    expect(note).toContain("Do not write the");
+    // A square block of empty background looked like a rendering fault.
+    expect(note).toContain("not a large empty block");
   });
 });

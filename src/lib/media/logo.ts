@@ -8,9 +8,11 @@ export interface BrandLogo {
 /** Where the real logo is stamped, and how much room the artwork must leave. */
 export const LOGO_CORNER = "top-left" as const;
 /** Logo width as a share of the poster width. */
-const LOGO_WIDTH_RATIO = 0.18;
+const LOGO_WIDTH_RATIO = 0.20;
 /** Clear space around the logo, as a share of the poster width. */
 const MARGIN_RATIO = 0.035;
+/** The band the artwork keeps clear, as a share of the poster's height. */
+const RESERVED_HEIGHT_RATIO = 0.10;
 
 /**
  * Stamps the brand's own logo onto a generated poster.
@@ -53,9 +55,15 @@ export async function stampLogo(
 
 /** The space the artwork must keep clear, described for the image prompt. */
 export function logoReservationNote(): string {
-  return `A real logo will be placed into the top-left corner after this image is
-made. Leave the top-left ${Math.round(LOGO_WIDTH_RATIO * 100) + 8}% of the width
-and the same height completely empty - flat background only, no text, no
-illustration, no border pattern. Do not draw a logo, mascot, monogram, brand
-mark or brand name anywhere in the image.`;
+  return `A real logo is placed into the TOP-LEFT corner after this image is made.
+Keep a shallow band across the top ${Math.round(RESERVED_HEIGHT_RATIO * 100)}% of the
+height clear on the left ${Math.round(LOGO_WIDTH_RATIO * 100) + 6}% of the width: plain
+background only there, no text, no illustration, no border pattern. It is a small
+corner, not a large empty block - the rest of the poster runs normally right up
+to it.
+
+Do not draw a logo, mascot, monogram or brand mark anywhere. Do not write the
+brand name anywhere in the artwork, in any corner, at any size. The brand is
+identified by the mark that is added afterwards, so any name you draw becomes a
+duplicate.`;
 }

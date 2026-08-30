@@ -27,6 +27,7 @@ model Brand {
   directives StrategicDirective[]
   cmoConversations CmoConversation[]
   campaigns Campaign[]
+  references BrandReference[]
 }
 
 model CmoConversation {
@@ -58,6 +59,22 @@ model CmoMessage {
 /// rebuilt for whichever option the user actually chose. The Strategist only
 /// ever schedules its own recommended option, so the plan is recomputed on
 /// selection rather than stored once.
+/// Approved visual material the brand uploaded: campaign examples, product and
+/// people photography. Kept as bytes so generated artwork can be conditioned on
+/// the brand's real look rather than a prose description of it.
+model BrandReference {
+  id        String   @id @default(cuid())
+  brandId   String
+  brand     Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  role      String
+  fileName  String
+  mediaType String
+  data      Bytes
+  createdAt DateTime @default(now())
+
+  @@index([brandId, role])
+}
+
 model Campaign {
   id               String   @id @default(cuid())
   brandId          String

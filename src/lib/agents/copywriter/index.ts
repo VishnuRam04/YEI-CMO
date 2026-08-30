@@ -447,6 +447,9 @@ async function runTextGeneration(
 
 const NEWLINE = String.fromCharCode(10);
 
+/** How many approved references the artwork is conditioned on. */
+const MAX_REFERENCE_IMAGES = 4;
+
 const IMAGE_MODEL_BY_TIER = {
   draft: "gemini-3.1-flash-lite-image",
   default: MODELS.copywriterImage,
@@ -488,6 +491,23 @@ async function runImageGeneration(
         mediaType: brand.logoMediaType ?? "image/png",
       }
     : null;
+
+  // The brand's own approved material, shown to the image model as ground
+  // truth. Describing a look in prose never reproduced it: posters came back
+  // in a house style that was nothing like what the brand had uploaded.
+  const referenceRows = await getDb().brandReference.findMany({
+    where: {
+      brandId: input.brandId,
+      role: { in: ["approved-visual-reference", "product-photography"] },
+    },
+    orderBy: { createdAt: "desc" },
+    take: MAX_REFERENCE_IMAGES,
+    select: { data: true, mediaType: true },
+  });
+  const referenceImages = referenceRows.map((row) => ({
+    bytes: new Uint8Array(row.data),
+    mediaType: row.mediaType,
+  }));
 
   const memory = brandMemory(brand);
   if (brandLogo) {
@@ -629,16 +649,21 @@ async function runImageGeneration(
 
 WHAT WAS WRONG WITH YOUR PREVIOUS ATTEMPT - fix all of it:
 ${corrections.map((note) => `- ${note}`).join(NEWLINE)}`;
-    const modelPrompt = payload.referenceImageUrls?.length
+    const supplied = [
+      ...(payload.referenceImageUrls ?? []).map((url) => ({
+        type: "image" as const,
+        image: url as string | Uint8Array,
+      })),
+      ...referenceImages.map((reference) => ({
+        type: "image" as const,
+        image: reference.bytes as string | Uint8Array,
+        mediaType: reference.mediaType,
+      })),
+    ];
+    const modelPrompt = supplied.length
       ? [{
           role: "user" as const,
-          content: [
-            { type: "text" as const, text: attemptPrompt },
-            ...payload.referenceImageUrls.map((url) => ({
-              type: "image" as const,
-              image: url,
-            })),
-          ],
+          content: [{ type: "text" as const, text: attemptPrompt }, ...supplied],
         }]
       : attemptPrompt;
 

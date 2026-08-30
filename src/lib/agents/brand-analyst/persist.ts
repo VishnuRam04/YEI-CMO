@@ -30,6 +30,35 @@ function jsonValue(value: unknown) {
  * words and never matched. Keeping the bytes lets posters composite the real
  * thing instead.
  */
+/** Image roles worth keeping as visual ground truth for generated artwork. */
+const REFERENCE_ROLES = new Set([
+  "approved-visual-reference",
+  "product-photography",
+  "people-photography",
+  "alternate-logo",
+]);
+
+const MAX_STORED_REFERENCES = 12;
+
+/** Decodes an uploaded image source into bytes Prisma can store. */
+function decodeUpload(
+  data: string,
+  fallbackType: string,
+): { bytes: Uint8Array<ArrayBuffer>; mediaType: string } | null {
+  const match = /^data:([^;,]+);base64,([\s\S]+)$/i.exec(data);
+  const encoded = (match?.[2] ?? data).replace(/\s+/g, "");
+  try {
+    const buffer = Buffer.from(encoded, "base64");
+    if (buffer.byteLength === 0) return null;
+    const bytes = new Uint8Array(
+      buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer,
+    );
+    return { bytes, mediaType: match?.[1]?.toLowerCase() ?? fallbackType };
+  } catch {
+    return null;
+  }
+}
+
 function primaryLogoUpload(
   payload: BrandAnalystPayload,
 ): { bytes: Uint8Array<ArrayBuffer>; mediaType: string } | null {
@@ -123,4 +152,27 @@ export async function persistBrandProfile(
     update: { name, url, kernel, voice, logoImage, logoMediaType },
     create: { id: brandId, name, url, kernel, voice, logoImage, logoMediaType },
   });
+
+  // Approved visual material is kept so generated artwork can be conditioned on
+  // the brand's real look. Only replaced when this run supplied some, so a
+  // later crawl without uploads does not clear it.
+  const references = payload.sources.flatMap((source) => {
+    if (source.kind !== "image" || !("data" in source) || !source.data) return [];
+    if (!REFERENCE_ROLES.has(source.label)) return [];
+    const decoded = decodeUpload(source.data, source.mimeType);
+    return decoded
+      ? [{
+          brandId,
+          role: source.label,
+          fileName: source.fileName.slice(0, 255),
+          mediaType: decoded.mediaType,
+          data: decoded.bytes,
+        }]
+      : [];
+  }).slice(0, MAX_STORED_REFERENCES);
+
+  if (references.length > 0) {
+    await db.brandReference.deleteMany({ where: { brandId } });
+    await db.brandReference.createMany({ data: references });
+  }
 }
