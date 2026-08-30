@@ -23,6 +23,35 @@ function jsonValue(value: unknown) {
   return JSON.parse(JSON.stringify(value));
 }
 
+
+/**
+ * The primary logo as the user supplied it. Only a text description of the
+ * mark used to survive onboarding, so every generated poster redrew it from
+ * words and never matched. Keeping the bytes lets posters composite the real
+ * thing instead.
+ */
+function primaryLogoUpload(
+  payload: BrandAnalystPayload,
+): { bytes: Uint8Array<ArrayBuffer>; mediaType: string } | null {
+  for (const source of payload.sources) {
+    if (source.kind !== "image" || !("data" in source) || !source.data) continue;
+    if (source.label !== "primary-logo") continue;
+    const match = /^data:([^;,]+);base64,([\s\S]+)$/i.exec(source.data);
+    const encoded = (match?.[2] ?? source.data).replace(/\s+/g, "");
+    try {
+      const buffer = Buffer.from(encoded, "base64");
+      const bytes = new Uint8Array(
+        buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer,
+      );
+      if (bytes.byteLength === 0) continue;
+      return { bytes, mediaType: match?.[1]?.toLowerCase() ?? source.mimeType };
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
 export async function persistBrandProfile(
   brandId: string,
   payload: BrandAnalystPayload,
@@ -84,9 +113,14 @@ export async function persistBrandProfile(
     },
   });
 
+  // Only overwrite the stored logo when this run actually supplied one, so a
+  // later crawl without an upload does not wipe it.
+  const logo = primaryLogoUpload(payload);
+  const logoImage = logo?.bytes;
+  const logoMediaType = logo?.mediaType;
   await db.brand.upsert({
     where: { id: brandId },
-    update: { name, url, kernel, voice },
-    create: { id: brandId, name, url, kernel, voice },
+    update: { name, url, kernel, voice, logoImage, logoMediaType },
+    create: { id: brandId, name, url, kernel, voice, logoImage, logoMediaType },
   });
 }

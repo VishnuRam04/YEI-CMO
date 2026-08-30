@@ -64,6 +64,8 @@ type VisualKit = {
   motifs: string[];
   typography: string[];
   logoDescription: string;
+  /** Set when the real logo will be composited in afterwards. */
+  logoReservation?: string;
   styleFragment: string;
   logoSafeArea: string;
 };
@@ -292,7 +294,7 @@ export function buildImagePrompt(
   poster?: PosterCopy,
 ): string {
   const identity = [
-    "BRAND COLOURS - use these exact hex values and no others as the dominant colours:",
+    "BRAND COLOURS - these hex values are a specification for you to match by eye. NEVER draw the codes themselves, and never draw swatches, chips or a colour key:",
     paletteBlock(visualKit),
     visualKit.motifs.length
       ? `${NL}BRAND MOTIFS - reuse these recurring elements:${NL}${visualKit.motifs.map((motif) => `- ${motif}`).join(NL)}`
@@ -325,11 +327,14 @@ explicitly asks for it.`;
   // Poster mode renders approved copy inside the artwork, so the wording is
   // quoted exactly. Anything the model paraphrases becomes a claim the brand
   // never approved.
-  const logoBlock = visualKit.logoDescription
-    ? `BRAND MARK - reconstruct it from this description and place it clearly, with clear space around it:
+  const logoBlock = visualKit.logoReservation
+    ? `BRAND MARK
+${visualKit.logoReservation}`
+    : visualKit.logoDescription
+      ? `BRAND MARK - reconstruct it from this description and place it clearly, with clear space around it:
 ${visualKit.logoDescription}
-Render the brand wording exactly as written above, spelled correctly. If a reference image of the real logo is supplied, copy that instead and ignore this description.`
-    : "No confirmed logo exists. Do not invent a logo, monogram or brand mark.";
+Render the brand wording exactly as written above, spelled correctly.`
+      : "No confirmed logo exists. Do not invent a logo, monogram or brand mark.";
 
   return `Design a single social media poster - an informational graphic, not a photograph - for ${kernel.name}.
 

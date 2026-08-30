@@ -296,6 +296,7 @@ const VisualJudgementSchema = z.object({
 export function buildVisualJudgePrompt(
   memory: JudgeableBrandMemory,
   expectedWords: string[],
+  logoIsAuthentic = false,
 ): string {
   const kit = memory.visualKit ?? {};
   return `You are the Brand Judge looking at a finished poster image.
@@ -310,7 +311,9 @@ Palette - the feature colours should come from this list:
 ${(kit.paletteRoles?.length
     ? kit.paletteRoles.map((entry) => `- ${entry.hex} (${entry.role})`)
     : (kit.palette ?? []).map((hex) => `- ${hex}`)).join("\n") || "- none confirmed"}
-Brand mark: ${kit.logoDescription || "none confirmed"}
+Brand mark: ${logoIsAuthentic
+    ? `the brand's own logo file, placed into the artwork programmatically. It is correct by definition - never judge it against a description, never call it wrong, incomplete or missing wording. Score "logo" on placement only: is it present once, clear of other elements, and not overlapped or cropped?`
+    : kit.logoDescription || "none confirmed"}
 Motifs: ${(kit.motifs ?? []).join(", ") || "none confirmed"}
 Lettering style: ${(kit.typography ?? []).join("; ") || "none confirmed"}
 
@@ -318,12 +321,14 @@ THE WORDS THAT SHOULD APPEAR, EXACTLY
 ${expectedWords.map((word) => `- ${word}`).join("\n")}
 
 Look at the image and score 0 to 100:
-palette    - Do the feature colours come from the brand palette? Score low
-             only for a feature colour that is genuinely not in the list, not
-             for a neutral background or for using a subset of the palette.
-logo       - Does the brand mark appear, look like the description, and appear
-             once rather than repeatedly? No mark at all when one is confirmed
-             scores low, and so does the mark repeated several times.
+palette    - Do the feature colours - headings, panels, buttons - come from the
+             brand palette? Score low only for a dominant feature colour that is
+             genuinely not in the list. A neutral background, a subset of the
+             palette, and illustrative details that are multi-coloured by nature
+             such as rainbows are all fine and must not be marked down.
+logo       - ${logoIsAuthentic
+    ? "Is the supplied mark present once, uncropped and clear of other elements? Its content is not yours to judge."
+    : "Does the brand mark appear, look like the description, and appear once rather than repeatedly? No mark at all when one is confirmed scores low, and so does the mark repeated several times."}
 motif      - Are the brand's motifs used, without inventing a different visual
              language?
 legibility - Is the text readable, well spaced, inside the margins, and not
@@ -354,13 +359,14 @@ export async function judgeRenderedPoster(
   memory: JudgeableBrandMemory,
   image: { bytes: Uint8Array; mediaType: string },
   expectedWords: string[],
+  logoIsAuthentic = false,
 ): Promise<BrandJudgeCriterion[]> {
   const call = await generateText({
     model: model(MODELS.judge),
     messages: [{
       role: "user",
       content: [
-        { type: "text", text: buildVisualJudgePrompt(memory, expectedWords) },
+        { type: "text", text: buildVisualJudgePrompt(memory, expectedWords, logoIsAuthentic) },
         { type: "image", image: image.bytes, mediaType: image.mediaType },
       ],
     }],

@@ -13,6 +13,11 @@ model Brand {
   url       String
   kernel    Json
   voice     Json
+  /// The primary logo exactly as uploaded. Posters composite these bytes in
+  /// rather than asking an image model to redraw the mark from a description,
+  /// which never reproduces it faithfully.
+  logoImage     Bytes?
+  logoMediaType String?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   plans     Plan[]
@@ -130,23 +135,6 @@ model Metric {
   spend       Float
   conversions Int
   @@index([brandId, date])
-}
-
-model Campaign {
-  id               String   @id @default(cuid())
-  brandId          String
-  conversationId   String?
-  strategyId       String   @unique
-  objective        String
-  selectedOptionId String
-  status           String   @default("proposed")
-  strategy         Json
-  executionPlan    Json
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  brand            Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
-
-  @@index([brandId, createdAt])
 }
 
 model Pattern {

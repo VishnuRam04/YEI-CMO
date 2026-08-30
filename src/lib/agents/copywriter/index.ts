@@ -1,5 +1,6 @@
 import { generateText, NoObjectGeneratedError, Output, streamText } from "ai";
 import { getDb } from "@/lib/db";
+import { logoReservationNote, stampLogo } from "@/lib/media/logo";
 import { storeGeneratedImage } from "@/lib/media/store";
 import { MODELS, model } from "@/lib/agents/models";
 import { agentFailure, agentSuccess } from "@/lib/agents/output";
@@ -184,6 +185,8 @@ function brandMemory(brand: { name: string; kernel: unknown; voice: unknown }) {
       paletteRoles: colorEntries,
       motifs: strings(visualIdentity.motifs),
       typography: strings(visualIdentity.typographyCharacteristics),
+      // Set only when a real logo file exists and will be composited in.
+      logoReservation: undefined as string | undefined,
       logoDescription: logoText.length || logoTagline
         ? [
             `Type: ${text(storedLogo.type, "unknown")}`,
@@ -456,7 +459,13 @@ async function runImageGeneration(
 ): Promise<AgentOutput<CopywriterResult>> {
   const brand = await getDb().brand.findUnique({
     where: { id: input.brandId },
-    select: { name: true, kernel: true, voice: true },
+    select: {
+      name: true,
+      kernel: true,
+      voice: true,
+      logoImage: true,
+      logoMediaType: true,
+    },
   });
   if (!brand) {
     return agentFailure({
@@ -471,8 +480,19 @@ async function runImageGeneration(
       },
     });
   }
+  // With the real file in hand the mark is stamped on afterwards, so the
+  // artwork is told to leave its corner empty and draw no logo at all.
+  const brandLogo = brand.logoImage
+    ? {
+        bytes: new Uint8Array(brand.logoImage),
+        mediaType: brand.logoMediaType ?? "image/png",
+      }
+    : null;
 
   const memory = brandMemory(brand);
+  if (brandLogo) {
+    memory.visualKit.logoReservation = logoReservationNote();
+  }
   const tier = payload.tier ?? "default";
   const imageModel = IMAGE_MODEL_BY_TIER[tier];
   // Poster wording is written from the approved caption rather than sliced out
@@ -630,11 +650,27 @@ ${corrections.map((note) => `- ${note}`).join(NEWLINE)}`;
         google: { responseModalities: ["IMAGE"] },
       },
     });
-    const file = generated.files.find((entry) => entry.mediaType.startsWith("image/"));
-    if (!file) {
+    const generatedFile = generated.files.find((entry) => entry.mediaType.startsWith("image/"));
+    if (!generatedFile) {
       corrections = ["No image was produced. Return a single poster image."];
       lastRejection = "Gemini did not return an image.";
       continue;
+    }
+
+    // Stamp the real mark before anything is judged, so the judge reviews the
+    // poster that will actually ship rather than one missing its logo.
+    let file: { uint8Array: Uint8Array; mediaType: string } = generatedFile;
+    if (brandLogo) {
+      try {
+        const stamped = await stampLogo(
+          { bytes: generatedFile.uint8Array, mediaType: generatedFile.mediaType },
+          brandLogo,
+        );
+        file = { uint8Array: stamped.bytes, mediaType: stamped.mediaType };
+      } catch (error) {
+        // A failed stamp must not lose the artwork; it just ships unbranded.
+        console.error("[copywriter] could not stamp the brand logo.", error);
+      }
     }
 
     if (!posterCopy) {
@@ -652,6 +688,7 @@ ${corrections.map((note) => `- ${note}`).join(NEWLINE)}`;
           ...posterCopy.highlights,
           posterCopy.callToAction,
         ].filter(Boolean),
+        Boolean(brandLogo),
       );
       // The wording verdict is fixed once accepted. Re-reading it off the
       // previous attempt's combined report duplicated criteria every pass.
