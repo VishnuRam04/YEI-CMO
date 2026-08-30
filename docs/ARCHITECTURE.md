@@ -38,6 +38,7 @@ flowchart LR
         St["Strategist"]
         Cw["Copywriter"]
         Cc["Campaign Critic"]
+        BAref["Brand Analyst<br/>see ①"]
     end
 
     subgraph B4["④ Brand Judge"]
@@ -82,7 +83,9 @@ flowchart LR
 ## How it flows
 
 **The owner only ever talks to the CMO.** It reads Brand Memory, decides which
-specialists to run, and hands back a plan or an answer.
+of five specialists to run, and hands back a plan or an answer. The Brand
+Analyst is one of those five — it is drawn in ① because what it produces *is*
+Brand Memory.
 
 **The CMO is a loop, not a router.** Most assistants decide everything up front
 then execute blindly. This one runs a step, looks at the result, and decides
@@ -123,6 +126,7 @@ that wrote the draft.
 | Poster artwork | Gemini 3.1 Flash Image | Generates the poster image |
 | Brand Analyst | Gemini 3.1 Pro | Reads the brand's site and files |
 | Brand Judge | Gemini 3.1 Pro | Reviews everything written |
+| Campaign Critic | Gemini 3.1 Pro | Pre-flight and post-flight campaign review |
 
 Cost is tracked per turn and shown to the user: a question costs about **RM0.02**,
 a full campaign plan about **RM0.13**.
