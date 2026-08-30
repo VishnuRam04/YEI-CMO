@@ -1,13 +1,15 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   Activity, BarChart3, BrainCircuit, CalendarDays, ChevronDown,
-  Command, MessageCircle, ScanSearch, Sparkles,
+  MessageCircle, ScanSearch, Sparkles,
 } from "lucide-react";
 import type { ReactNode } from "react";
+import { AGENT_COUNT } from "@/lib/agents/roster";
 
 const nav = [
   { href: "/onboard", label: "Onboard", icon: ScanSearch },
@@ -44,7 +46,9 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="app-shell">
       <aside className="sidebar">
         <Link href="/" className="brand-lockup">
-          <span className="brand-mark"><Command size={18} strokeWidth={2.5} /></span>
+          <span className="brand-mark">
+            <Image src="/northwind.png" alt="" width={26} height={26} priority />
+          </span>
           <span><div className="brand-name">Northwind</div><div className="brand-kicker">CMO intelligence</div></span>
         </Link>
         <div className="nav-label">Workspace</div>
@@ -70,10 +74,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       </aside>
       <div className="main-column">
         <header className="topbar">
-          <div className="mobile-brand"><span className="brand-mark" style={{ width: 28, height: 28, borderRadius: 8 }}><Command size={14} /></span>Northwind</div>
+          <div className="mobile-brand"><span className="brand-mark" style={{ width: 28, height: 28, borderRadius: 8 }}><Image src="/northwind.png" alt="" width={20} height={20} /></span>Northwind</div>
           <div className="crumb"><span>{workspaceName}</span><span>/</span><strong>{current}</strong></div>
           <div className="top-actions">
-            <div className="agent-pill"><span className="status-dot" /> 4 agents online</div>
+            <div className="agent-pill"><span className="status-dot" /> {AGENT_COUNT} agents online</div>
             <button className="button button-primary"><Sparkles size={13} /> New campaign</button>
           </div>
         </header>

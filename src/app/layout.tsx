@@ -5,6 +5,10 @@ import { AppShell } from "@/components/layout/app-shell";
 export const metadata: Metadata = {
   title: "Northwind CMO",
   description: "Your agentic marketing operating system",
+  icons: {
+    icon: "/icon.png",
+    apple: "/apple-icon.png",
+  },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

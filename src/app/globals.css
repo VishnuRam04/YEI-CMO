@@ -55,7 +55,8 @@ a { color: inherit; text-decoration: none; }
   .sidebar:not(:hover):not(:focus-within) .sidebar-profile { justify-content: center; padding-left: 0; padding-right: 0; }
 }
 .brand-lockup { display: flex; align-items: center; gap: 11px; padding: 0 8px 24px; }
-.brand-mark { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 11px; background: var(--lime); color: var(--navy); box-shadow: 0 0 30px rgba(200,241,105,.18); }
+.brand-mark { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 11px; background: #f3f7ee; color: var(--navy); box-shadow: 0 0 30px rgba(200,241,105,.14); overflow: hidden; }
+.brand-mark img { display: block; object-fit: contain; }
 .brand-name { font-weight: 750; letter-spacing: -.04em; font-size: 17px; }
 .brand-kicker { color: #9cabaa; font-size: 9px; text-transform: uppercase; letter-spacing: .17em; margin-top: 3px; }
 .nav-label { color: #84928f; font-size: 9px; letter-spacing: .18em; text-transform: uppercase; padding: 10px 11px 8px; }
