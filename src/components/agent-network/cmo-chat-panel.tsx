@@ -6,6 +6,7 @@ import {
   ArrowRight,
   BrainCircuit,
   CalendarCheck,
+  Check,
   ChevronDown,
   Code2,
   ExternalLink,
@@ -173,6 +174,61 @@ function plainResearchText(value: string): string {
     .trim();
 }
 
+
+/** What each agent is for, in the user's terms rather than the agent's id. */
+const agentRoles: Record<string, string> = {
+  cmo: "Deciding what is needed",
+  "brand-analyst": "Reading your brand",
+  analyst: "Researching the market",
+  strategist: "Building the plan",
+  copywriter: "Writing the content",
+  "campaign-critic": "Reviewing the campaign",
+};
+
+type AgentStage = {
+  agentId: DevTraceEvent["agentId"];
+  label: string;
+  status: DevTraceStatus;
+  elapsedMs: number;
+};
+
+/** Latest state per agent, in the order they first appeared in the run. */
+function agentStages(events: DevTraceEvent[]): AgentStage[] {
+  const byAgent = new Map<string, AgentStage>();
+  for (const event of events) {
+    byAgent.set(event.agentId, {
+      agentId: event.agentId,
+      label: event.label,
+      status: event.status,
+      elapsedMs: event.elapsedMs,
+    });
+  }
+  return [...byAgent.values()];
+}
+
+function AgentActivity({ events, running }: { events: DevTraceEvent[]; running: boolean }) {
+  const stages = agentStages(events);
+  if (stages.length === 0) return null;
+  return (
+    <div className={`agent-activity ${running ? "running" : "done"}`} aria-live="polite">
+      {stages.map((stage) => (
+        <div key={stage.agentId} className={`agent-chip ${stage.status}`}>
+          <i />
+          <span>
+            <b>{agentName(stage.agentId)}</b>
+            <small>{stage.status === "working"
+              ? (agentRoles[stage.agentId] ?? stage.label)
+              : stage.label}</small>
+          </span>
+          {stage.status === "completed" && <Check size={11} />}
+          {stage.status === "failed" && <X size={11} />}
+          {stage.status === "working" && <em>{duration(stage.elapsedMs)}</em>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function CmoChatPanel({
   open,
   onClose,
@@ -191,7 +247,7 @@ export function CmoChatPanel({
   const [draft, setDraft] = useState("");
   const [status, setStatus] = useState<ChatStatus>("idle");
   const [devTraceEnabled, setDevTraceEnabled] = useState(false);
-  const [devTraceOpen, setDevTraceOpen] = useState(true);
+  const [devTraceOpen, setDevTraceOpen] = useState(false);
   const [traceEvents, setTraceEvents] = useState<DevTraceEvent[]>([]);
   const [clock, setClock] = useState(() => Date.now());
   const [approvedPlan, setApprovedPlan] = useState<{
@@ -820,14 +876,14 @@ export function CmoChatPanel({
           ))
         )}
 
-        {status !== "idle" && (
+        {status !== "idle" && traceEvents.length === 0 && (
           <div className="cmo-chat-thinking">
             <LoaderCircle size={13} />
-            {latestTrace
-              ? `${agentName(latestTrace.agentId)} · ${latestTrace.label}`
-              : status === "thinking" ? "CMO is routing the request" : "Preparing response"}
+            {status === "thinking" ? "CMO is routing the request" : "Preparing response"}
           </div>
         )}
+        {/* Who is working, and on what, while the request runs. */}
+        <AgentActivity events={traceEvents} running={status !== "idle"} />
         <div ref={messagesEndRef} />
       </div>
 

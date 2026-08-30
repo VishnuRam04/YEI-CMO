@@ -296,12 +296,15 @@ h2, h3, p { margin-top: 0; }
   padding-left: max(26px, calc((100% - 860px) / 2));
   padding-right: max(26px, calc((100% - 860px) / 2));
 }
+/* The header spans the full width: centring it with the message column left
+   the title floating in the middle while Clear sat at the far edge. */
 .cmo-chat-panel.workspace .cmo-chat-header {
-  grid-template-columns: 42px minmax(0,1fr) auto; min-height: 66px;
-  padding: 12px max(26px, calc((100% - 860px) / 2));
+  grid-template-columns: 36px minmax(0,1fr) auto; min-height: 54px;
+  padding: 9px 22px; gap: 10px;
 }
-.cmo-chat-panel.workspace .cmo-chat-avatar { width: 42px; height: 42px; }
-.cmo-chat-panel.workspace .cmo-chat-header strong { font-size: 17px; }
+.cmo-chat-panel.workspace .cmo-chat-avatar { width: 36px; height: 36px; border-radius: 10px; }
+.cmo-chat-panel.workspace .cmo-chat-header strong { font-size: 15px; }
+.cmo-chat-panel.workspace .cmo-chat-messages { padding-top: 22px; }
 .cmo-chat-panel.workspace .cmo-chat-messages { padding-top: 30px; padding-bottom: 10px; }
 .cmo-chat-panel.workspace .cmo-chat-form { padding-top: 14px; padding-bottom: 30px; background: #f6f7f3; border-top: 0; }
 .cmo-chat-panel.workspace .cmo-chat-form textarea {
@@ -331,6 +334,26 @@ h2, h3, p { margin-top: 0; }
 .cmo-chat-panel.workspace .cmo-chat-empty strong { font-size: 26px; }
 .cmo-chat-panel.workspace .cmo-chat-empty p { max-width: 460px; font-size: 14px; line-height: 1.7; }
 .cmo-chat-panel.workspace .cmo-chat-thinking { font-size: 12px; padding: 10px 14px; }
+
+/* Live pipeline: one chip per agent, showing what it is doing right now. */
+.agent-activity { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 18px; }
+.agent-chip { display: flex; align-items: center; gap: 9px; padding: 9px 13px; background: white; border: 1px solid #dfe4de; border-radius: 12px; box-shadow: 0 2px 10px rgba(18,34,28,.04); transition: border-color .2s ease, background .2s ease; }
+.agent-chip > i { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: #c3ccc6; }
+.agent-chip > span { display: grid; gap: 2px; min-width: 0; }
+.agent-chip b { color: #26322e; font-size: 11px; font-weight: 700; }
+.agent-chip small { color: #78837e; font-size: 10px; line-height: 1.35; }
+.agent-chip em { color: #6f7c76; font-size: 10px; font-style: normal; font-variant-numeric: tabular-nums; }
+.agent-chip svg { flex: 0 0 auto; }
+.agent-chip.queued > i { background: #b9c4bd; }
+.agent-chip.working { border-color: #a8cf5d; background: #f7fbef; }
+.agent-chip.working > i { background: var(--lime); box-shadow: 0 0 0 4px rgba(200,241,105,.28); animation: cmo-trace-pulse 1.2s ease-in-out infinite; }
+.agent-chip.completed > i { background: #73a928; }
+.agent-chip.completed svg { color: #73a928; }
+.agent-chip.failed { border-color: #f0c4b6; background: #fdf4f1; }
+.agent-chip.failed > i { background: #d9694a; }
+.agent-chip.failed svg { color: #b4442a; }
+.agent-activity.done .agent-chip { background: #fafbf8; box-shadow: none; }
+.agent-activity.done .agent-chip small { color: #8d968f; }
 
 .cmo-chat-header { min-height:78px; display:grid; grid-template-columns:39px minmax(0,1fr) auto; align-items:center; gap:11px; padding:15px 16px; color:white; background:var(--navy); border-bottom:1px solid rgba(255,255,255,.08); }
 .cmo-chat-avatar { width:39px; height:39px; display:grid; place-items:center; color:var(--navy); background:var(--lime); border-radius:12px; box-shadow:0 0 24px rgba(200,241,105,.16); }
@@ -385,7 +408,7 @@ h2, h3, p { margin-top: 0; }
 .writer-image img { display:block; width:100%; max-width:520px; margin-top:9px; border-radius:10px; }
 .cmo-plan-note { margin:0; padding:11px 13px; background:#f4f7f2; border:1px dashed #cfdac4; border-radius:9px; color:#5c6763; font-size:9px; line-height:1.6; }
 .cmo-dev-trace { flex:0 0 auto; color:#dbe4df; background:#101a15; border-bottom:1px solid #28352e; }
-.cmo-dev-trace-toggle { width:100%; min-height:47px; display:grid; grid-template-columns:18px minmax(0,1fr) auto 16px; align-items:center; gap:7px; padding:8px 14px; color:inherit; background:transparent; border:0; cursor:pointer; text-align:left; }
+.cmo-dev-trace-toggle { width:100%; min-height:34px; display:grid; grid-template-columns:18px minmax(0,1fr) auto 16px; align-items:center; gap:7px; padding:8px 14px; color:inherit; background:transparent; border:0; cursor:pointer; text-align:left; }
 .cmo-dev-trace-toggle > svg:first-child { color:var(--lime); }
 .cmo-dev-trace-toggle > svg:last-child { color:#829189; transition:transform .18s ease; }
 .cmo-dev-trace.open .cmo-dev-trace-toggle > svg:last-child { transform:rotate(180deg); }

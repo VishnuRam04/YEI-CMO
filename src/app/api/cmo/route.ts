@@ -51,9 +51,12 @@ export async function POST(request: Request): Promise<Response> {
       const enqueue = (value: unknown) => {
         if (open) controller.enqueue(line(value));
       };
-      const unsubscribe = isCmoDevTraceEnabled()
-        ? subscribeToCmoDevTrace(traceId, (event: CmoDevTraceEvent) => enqueue(event))
-        : () => undefined;
+      // Which agent is working is progress the user should see. The payload
+      // attached to each stage is developer detail, so it is stripped unless
+      // dev trace is on.
+      const showDetail = isCmoDevTraceEnabled();
+      const unsubscribe = subscribeToCmoDevTrace(traceId, (event: CmoDevTraceEvent) =>
+        enqueue(showDetail ? event : { ...event, detail: undefined }));
 
       enqueue({ type: "state", agentId: "cmo", state: "queued" });
       emitCmoDevTrace(traceId, {
