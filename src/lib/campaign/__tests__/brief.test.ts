@@ -3,6 +3,7 @@ import {
   buildPlanItemBrief,
   copywriterChannelFor,
   findScheduleItem,
+  needsVideoScript,
 } from "../brief";
 import type { StoredCampaign } from "../store";
 
@@ -41,6 +42,26 @@ const campaign = {
     schedule: [{ ...item, sequence: 1 }, item],
   },
 } as unknown as StoredCampaign;
+
+describe("video slots", () => {
+  it("offers a script only where the plan asks for filming", () => {
+    expect(needsVideoScript("Short introduction video")).toBe(true);
+    expect(needsVideoScript("Instagram Reel")).toBe(true);
+    expect(needsVideoScript("Behind the scenes clip")).toBe(true);
+    // A caption is enough for these; a shot list would be noise.
+    expect(needsVideoScript("Photo carousel with real examples")).toBe(false);
+    expect(needsVideoScript("Questions and answers story")).toBe(false);
+    expect(needsVideoScript("Reminder email")).toBe(false);
+  });
+
+  it("briefs the script on the slot, not the campaign in general", () => {
+    const built = buildPlanItemBrief(campaign, { ...item, assetType: "Short introduction video" });
+    expect(built.needsScript).toBe(true);
+    expect(built.scriptBrief).toContain("Short introduction video");
+    expect(built.scriptBrief).toContain("Confidence for Primary School");
+    expect(built.scriptBrief).toContain("Share one real photo");
+  });
+});
 
 describe("plan item briefs", () => {
   it("maps plan channels onto what the Copywriter supports", () => {

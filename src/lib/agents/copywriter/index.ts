@@ -6,6 +6,7 @@ import { agentFailure, agentSuccess } from "@/lib/agents/output";
 import type { Agent, AgentInput, AgentOutput } from "@/lib/agents/types";
 import {
   buildImagePrompt,
+  buildScriptPrompt,
   buildPosterCopyPrompt,
   buildSystemPrompt,
   buildUserPrompt,
@@ -13,12 +14,15 @@ import {
 import {
   CHANNEL_CONSTRAINTS,
   PosterCopySchema,
+  ScriptSchema,
   VariantsSchema,
   isImagePayload,
+  isScriptPayload,
   isTextPayload,
   type CopywriterPayload,
   type CopywriterResult,
   type ImageGenerationPayload,
+  type ScriptGenerationPayload,
   type TextGenerationPayload,
   type TextVariant,
 } from "./schema";
@@ -716,6 +720,113 @@ async function runImageGeneration(
   });
 }
 
+
+async function runScriptGeneration(
+  input: AgentInput<CopywriterPayload>,
+  payload: ScriptGenerationPayload,
+): Promise<AgentOutput<CopywriterResult>> {
+  const brand = await getDb().brand.findUnique({
+    where: { id: input.brandId },
+    select: { name: true, kernel: true, voice: true },
+  });
+  if (!brand) {
+    return agentFailure({
+      agentId: "copywriter",
+      traceId: input.traceId,
+      model: MODELS.copywriter,
+      summary: "Brand memory not found",
+      error: {
+        code: "INPUT_ERROR",
+        message: "Build brand memory before writing a script.",
+        retryable: false,
+      },
+    });
+  }
+
+  const memory = brandMemory(brand);
+  const durationSeconds = payload.durationSeconds ?? 30;
+  let script;
+  try {
+    const call = await generateText({
+      model: model(MODELS.copywriter),
+      instructions: buildSystemPrompt(memory.kernel, memory.voice, true),
+      prompt: buildScriptPrompt(memory.kernel.name, payload.brief, durationSeconds),
+      output: Output.object({ schema: ScriptSchema }),
+      maxOutputTokens: 3_000,
+      maxRetries: 1,
+      providerOptions: { google: { thinkingConfig: { thinkingLevel: "low" } } },
+    });
+    script = ScriptSchema.parse(call.output);
+  } catch (error) {
+    return agentFailure({
+      agentId: "copywriter",
+      traceId: input.traceId,
+      model: MODELS.copywriter,
+      summary: "Script could not be written",
+      error: {
+        code: NoObjectGeneratedError.isInstance(error) ? "VALIDATION_ERROR" : "MODEL_ERROR",
+        message: "The video script could not be written. Please retry.",
+        detail: error instanceof Error ? error.message : String(error),
+        retryable: true,
+      },
+    });
+  }
+
+  // Everything spoken or shown on screen is content the audience sees, so it
+  // faces the Brand Judge exactly like a caption does.
+  const spoken = [
+    script.hook,
+    ...script.scenes.map((scene) => scene.saidOrShown),
+    script.callToAction,
+  ].join("\n");
+  const reports = await reviewContent(memory, [{ id: "script", content: spoken }], "instagram");
+  const report = reports.get("script") ?? buildReport([]);
+  const brandAudit: BrandAuditReport[] = [{
+    angle: "script",
+    passed: report.passed,
+    overallScore: report.overallScore,
+    criteria: report.criteria.map((criterion) => ({
+      criterion: criterion.criterion,
+      score: criterion.score,
+      passed: criterion.passed,
+      reasons: criterion.reasons,
+    })),
+    notes: report.notes,
+  }];
+  if (!report.passed) {
+    return agentFailure({
+      agentId: "copywriter",
+      traceId: input.traceId,
+      model: MODELS.copywriter,
+      summary: `Script failed the Brand Judge - ${report.overallScore}/100`,
+      error: {
+        code: "VALIDATION_ERROR",
+        message: "The script did not pass the Brand Judge. Please retry.",
+        detail: report.criteria
+          .filter((criterion) => !criterion.passed)
+          .map((criterion) => `${criterion.criterion}: ${criterion.reasons.join("; ")}`)
+          .join(" | "),
+        retryable: true,
+      },
+    });
+  }
+
+  return agentSuccess({
+    agentId: "copywriter",
+    traceId: input.traceId,
+    model: MODELS.copywriter,
+    result: {
+      kind: "script",
+      ...script,
+      totalSeconds: script.scenes.reduce((sum, scene) => sum + scene.seconds, 0),
+      brandAudit,
+    },
+    summary: `${script.scenes.length} shots - ${report.overallScore}/100`,
+    inputTokens: 0,
+    outputTokens: 0,
+  });
+}
+
 export const copywriterAgent: Agent<CopywriterPayload, CopywriterResult> = {
   id: "copywriter",
   model: MODELS.copywriter,
@@ -727,6 +838,9 @@ export const copywriterAgent: Agent<CopywriterPayload, CopywriterResult> = {
       }
       if (isImagePayload(input.payload)) {
         return await runImageGeneration(input, input.payload);
+      }
+      if (isScriptPayload(input.payload)) {
+        return await runScriptGeneration(input, input.payload);
       }
       return agentFailure({
         agentId: "copywriter",

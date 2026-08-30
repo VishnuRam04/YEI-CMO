@@ -376,5 +376,45 @@ are not in the text above. Do not add placeholder words. Spell every word
 correctly.`;
 }
 
+/**
+ * A shot list for someone filming on a phone, not a production treatment.
+ * Everything it asks for has to be filmable with what a small business
+ * already has.
+ */
+export function buildScriptPrompt(
+  brandName: string,
+  briefText: string,
+  durationSeconds: number,
+): string {
+  return `Write a short video script for ${brandName}.
+
+THE POST THIS VIDEO IS FOR
+<brief>
+${briefText}
+</brief>
+
+Target length: about ${durationSeconds} seconds.
+
+Write it for one person filming on a phone with no crew, no actors and no
+editing beyond trimming.
+
+hook          - the first line, said or shown in the opening two seconds.
+scenes        - 2 to 6 shots. For each: seconds, the shot (what the camera
+                sees), the action (what happens in it), and saidOrShown (the
+                exact words spoken or put on screen).
+callToAction  - the closing line telling the viewer exactly what to do.
+shoppingList  - anything that needs to be ready before filming: people,
+                props, permissions. Keep it to what a small business already
+                has to hand.
+
+RULES
+- Say only what the brief and brand memory support. Do not invent prices,
+  dates, discounts, results, awards or numbers of any kind.
+- Children and customers appear only where the brief already implies it, and
+  the shopping list must name the permission needed.
+- Plain spoken language. No jargon, no voice-of-god narration.
+- The seconds across all scenes should add up to roughly the target length.`;
+}
+
 // Re-export for callers that only need the type, keeps prompt.ts self-contained
 export type { RefineInstruction, Channel, CopywriterPayload };

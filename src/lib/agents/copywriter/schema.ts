@@ -121,7 +121,41 @@ export interface ImageGenerationPayload {
   posterSource?: string;
 }
 
-export type CopywriterPayload = TextGenerationPayload | ImageGenerationPayload;
+export interface ScriptGenerationPayload {
+  mode: "script";
+  brief: string;
+  /** Roughly how long the finished video should run. */
+  durationSeconds?: number;
+}
+
+export type CopywriterPayload =
+  | TextGenerationPayload
+  | ImageGenerationPayload
+  | ScriptGenerationPayload;
+
+/**
+ * A shot list someone can actually film on a phone. Lines are what is said or
+ * shown, so they must obey the same claim rules as a caption.
+ */
+export const ScriptSchema = z.object({
+  hook: z.string().trim().min(1).max(160),
+  scenes: z.array(z.object({
+    seconds: z.number().int().min(1).max(60),
+    shot: z.string().trim().min(1).max(200),
+    action: z.string().trim().min(1).max(300),
+    saidOrShown: z.string().trim().min(1).max(300),
+  })).min(2).max(8),
+  callToAction: z.string().trim().min(1).max(160),
+  shoppingList: z.array(z.string().trim().min(1).max(120)).max(8),
+});
+
+export type ScriptModelOutput = z.infer<typeof ScriptSchema>;
+
+export interface ScriptGenerationResult extends ScriptModelOutput {
+  kind: "script";
+  totalSeconds: number;
+  brandAudit?: BrandAuditReport[];
+}
 
 const textPayloadSchema = z.object({
   mode: z.literal("text").optional(),
@@ -158,10 +192,17 @@ const imagePayloadSchema = z.object({
   posterSource: z.string().trim().min(1).max(4_000).optional(),
 });
 
+const scriptPayloadSchema = z.object({
+  mode: z.literal("script"),
+  brief: z.string().trim().min(1).max(8_000),
+  durationSeconds: z.number().int().min(10).max(180).default(30),
+});
+
 export const CopywriterPayloadSchema: z.ZodType<CopywriterPayload> =
   z.discriminatedUnion("mode", [
     textPayloadSchema.extend({ mode: z.literal("text") }),
     imagePayloadSchema,
+    scriptPayloadSchema,
   ]).or(textPayloadSchema);
 
 export interface TextVariant extends z.infer<typeof VariantSchema> {
@@ -199,12 +240,21 @@ export interface ImageGenerationResult {
   brandAudit?: BrandAuditReport[];
 }
 
-export type CopywriterResult = TextGenerationResult | ImageGenerationResult;
+export type CopywriterResult =
+  | TextGenerationResult
+  | ImageGenerationResult
+  | ScriptGenerationResult;
+
+export function isScriptPayload(
+  payload: CopywriterPayload,
+): payload is ScriptGenerationPayload {
+  return payload.mode === "script";
+}
 
 export function isTextPayload(
   payload: CopywriterPayload,
 ): payload is TextGenerationPayload {
-  return payload.mode !== "image";
+  return payload.mode !== "image" && payload.mode !== "script";
 }
 
 export function isImagePayload(

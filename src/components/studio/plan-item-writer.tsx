@@ -1,8 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Copy, ImageIcon, LoaderCircle, RefreshCw, Sparkles } from "lucide-react";
-import type { BrandAuditReport, Channel, TextVariant } from "@/lib/agents/copywriter/schema";
+import { Check, Clapperboard, Copy, ImageIcon, LoaderCircle, RefreshCw, Sparkles } from "lucide-react";
+import type {
+  BrandAuditReport,
+  Channel,
+  ScriptGenerationResult,
+  TextVariant,
+} from "@/lib/agents/copywriter/schema";
+
+const BLANK_LINE = String.fromCharCode(10, 10);
 
 type ImageState = {
   url: string;
@@ -92,12 +99,16 @@ export function PlanItemWriter({
   channelNote,
   brief,
   imageBrief,
+  scriptBrief,
+  needsScript,
 }: {
   brandId: string;
   channel: Channel;
   channelNote: string;
   brief: string;
   imageBrief: string;
+  scriptBrief: string;
+  needsScript: boolean;
 }) {
   const [variants, setVariants] = useState<TextVariant[]>([]);
   const [selected, setSelected] = useState(0);
@@ -109,6 +120,9 @@ export function PlanItemWriter({
   const [imageStatus, setImageStatus] = useState<"idle" | "working">("idle");
   const [imageError, setImageError] = useState("");
   const [posterAudit, setPosterAudit] = useState<BrandAuditReport | null>(null);
+  const [script, setScript] = useState<ScriptGenerationResult | null>(null);
+  const [scriptStatus, setScriptStatus] = useState<"idle" | "working">("idle");
+  const [scriptError, setScriptError] = useState("");
 
   async function write() {
     setTextStatus("working");
@@ -156,6 +170,21 @@ export function PlanItemWriter({
       setImageError(error instanceof Error ? error.message : String(error));
     } finally {
       setImageStatus("idle");
+    }
+  }
+
+  async function writeScript() {
+    setScriptStatus("working");
+    setScriptError("");
+    try {
+      setScript(await runAgentRoute<ScriptGenerationResult>({
+        brandId,
+        payload: { mode: "script", brief: scriptBrief },
+      }));
+    } catch (error) {
+      setScriptError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setScriptStatus("idle");
     }
   }
 
@@ -207,8 +236,26 @@ export function PlanItemWriter({
             ? <><LoaderCircle size={13} /> Making the poster…</>
             : <><ImageIcon size={13} /> Make the poster</>}
         </button>
+        {needsScript && (
+          <button
+            type="button"
+            className="button button-ghost"
+            onClick={() => void writeScript()}
+            disabled={scriptStatus === "working"}
+          >
+            {scriptStatus === "working"
+              ? <><LoaderCircle size={13} /> Writing the script…</>
+              : <><Clapperboard size={13} /> Write the video script</>}
+          </button>
+        )}
       </div>
 
+      {needsScript && (
+        <p className="writer-note">
+          The plan asks for a video here, so you can also get a shot-by-shot
+          script to film from.
+        </p>
+      )}
       {channelNote && <p className="writer-note">{channelNote}</p>}
       {textError && <p className="writer-error">{textError}</p>}
 
@@ -278,6 +325,53 @@ export function PlanItemWriter({
         </div>
       )}
 
+
+      {scriptError && <p className="writer-error">{scriptError}</p>}
+      {script && (
+        <section className="script-card">
+          <header>
+            <span>Video script · about {script.totalSeconds}s</span>
+            <button
+              type="button"
+              className="button button-ghost icon-button"
+              aria-label="Copy the script"
+              onClick={() => void copy(
+                [
+                  `HOOK: ${script.hook}`,
+                  ...script.scenes.map((scene, index) =>
+                    `${index + 1}. (${scene.seconds}s) ${scene.shot}
+   Action: ${scene.action}
+   Say/show: ${scene.saidOrShown}`),
+                  `CALL TO ACTION: ${script.callToAction}`,
+                  script.shoppingList.length ? `BEFORE YOU FILM: ${script.shoppingList.join(", ")}` : "",
+                ].filter(Boolean).join(BLANK_LINE),
+                -2,
+              )}
+            >
+              {copied === -2 ? <Check size={13} /> : <Copy size={13} />}
+            </button>
+          </header>
+          <p className="script-hook">{script.hook}</p>
+          <ol className="script-scenes">
+            {script.scenes.map((scene, index) => (
+              <li key={index}>
+                <b>{scene.seconds}s · {scene.shot}</b>
+                <span>{scene.action}</span>
+                <em>&ldquo;{scene.saidOrShown}&rdquo;</em>
+              </li>
+            ))}
+          </ol>
+          <p className="script-cta">{script.callToAction}</p>
+          {script.shoppingList.length > 0 && (
+            <p className="script-list">
+              <b>Before you film:</b> {script.shoppingList.join(" · ")}
+            </p>
+          )}
+          {script.brandAudit?.[0] && (
+            <ScoreCard title="Brand judge · script" audit={script.brandAudit[0]} />
+          )}
+        </section>
+      )}
 
       {(image || imageError) && (
         <div className="writer-image">

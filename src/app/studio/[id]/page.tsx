@@ -153,6 +153,8 @@ export default async function StudioPage({
           channelNote={planItem.channelNote}
           brief={planItem.brief}
           imageBrief={planItem.imageBrief}
+          scriptBrief={planItem.scriptBrief}
+          needsScript={planItem.needsScript}
         />
       </div>
     </div>

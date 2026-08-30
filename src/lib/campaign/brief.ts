@@ -1,11 +1,16 @@
 import type { Channel } from "@/lib/agents/copywriter/schema";
 import type { StoredCampaign } from "./store";
 
+const NEWLINE = String.fromCharCode(10);
+
 export type ScheduleItem = StoredCampaign["executionPlan"]["schedule"][number];
 
 export interface PlanItemBrief {
   sequence: number;
   channel: Channel;
+  /** True when the plan asks for a video, so a shot list is offered too. */
+  needsScript: boolean;
+  scriptBrief: string;
   /** The channel named in the plan, which may be broader than the Copywriter's. */
   plannedChannel: string;
   channelNote: string;
@@ -35,6 +40,14 @@ export function copywriterChannelFor(planned: string): {
     channel: "instagram",
     note: `The Copywriter writes LinkedIn, social or email copy. "${planned}" is written as a short social post you can paste into it.`,
   };
+}
+
+/**
+ * Whether this slot is filmed rather than written. A caption alone is not
+ * enough for a video: the person still has to know what to point the camera at.
+ */
+export function needsVideoScript(assetType: string): boolean {
+  return /\b(?:video|reel|clip|film|footage|vlog)\b/i.test(assetType);
 }
 
 export function findScheduleItem(
@@ -87,9 +100,20 @@ export function buildPlanItemBrief(
     `The reader should come away ready to: ${item.expectedImpact}`,
   ].join("\n").slice(0, 8_000);
 
+  const scriptBrief = [
+    `A ${item.assetType} for ${campaign.executionPlan.campaignName}, published on ${item.channel}.`,
+    `Theme: ${item.theme}`,
+    `What this post must do: ${item.action}`,
+    `Why it is in the plan: ${item.purpose}`,
+    `Offer: ${campaign.strategy.offerStrategy}`,
+    chosen ? `Approach: ${chosen.approach}` : "",
+  ].filter(Boolean).join(NEWLINE).slice(0, 8_000);
+
   return {
     sequence: item.sequence,
     channel,
+    needsScript: needsVideoScript(item.assetType),
+    scriptBrief,
     plannedChannel: item.channel,
     channelNote: note,
     campaignName: campaign.executionPlan.campaignName,
