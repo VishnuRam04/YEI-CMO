@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   Activity, BarChart3, BrainCircuit, CalendarDays, ChevronDown,
-  Command, FlaskConical, LayoutDashboard, MessageCircle, Network, PenTool, ScanSearch, ShieldCheck, Sparkles,
+  Command, LayoutDashboard, MessageCircle, ScanSearch, Sparkles,
 } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -15,11 +15,7 @@ const nav = [
   { href: "/brand", label: "Brand", icon: BrainCircuit },
   { href: "/cmo", label: "CMO", icon: MessageCircle },
   { href: "/plan", label: "Plan", icon: CalendarDays },
-  { href: "/campaigns", label: "Campaigns", icon: ShieldCheck },
-  { href: "/studio/launch", label: "Studio", icon: PenTool },
-  { href: "/proof", label: "Proof", icon: FlaskConical },
   { href: "/insights", label: "Insights", icon: BarChart3 },
-  { href: "/network", label: "Network", icon: Network },
 ];
 
 function isActive(pathname: string, href: string) {

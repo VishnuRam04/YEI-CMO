@@ -224,7 +224,7 @@ function campaignResponseFromHandoffs(handoffs: WorkerHandoff[]): CmoResponse | 
       options: [],
       recommendation: "",
       planOffer: false,
-      nextStep: "Open Campaign Review, save the campaign details, and retry.",
+      nextStep: "Approve a campaign plan first, then ask me to review it.",
     };
   }
   const parsed = CampaignCriticResultSchema.safeParse(handoff?.detail);
@@ -709,7 +709,7 @@ async function delegate(
       return basicHandoff(
         "campaign-critic",
         "failed",
-        "No result data is stored for this campaign. Import metrics in Campaign Review first.",
+        "No result data is stored for this campaign. Import your metrics first.",
       );
     }
     const payload: CampaignCriticPayload = plan.reviewMode === "postflight"

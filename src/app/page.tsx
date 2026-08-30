@@ -19,7 +19,7 @@ const activity = [
 export default function OverviewPage() {
   return (
     <div className="page-wrap">
-      <PageHeading eyebrow="Wednesday, 19 August" title="Good morning, Alex." description="Your agent team has completed 14 tasks since yesterday. Here’s what is moving the brand forward." actions={<Link className="button button-dark" href="/network">View agent network <ArrowRight size={13} /></Link>} />
+      <PageHeading eyebrow="Wednesday, 19 August" title="Good morning, Alex." description="Your agent team has completed 14 tasks since yesterday. Here’s what is moving the brand forward." actions={<Link className="button button-dark" href="/cmo">Talk to your CMO <ArrowRight size={13} /></Link>} />
       <div className="grid-4">
         {metrics.map(({ icon: Icon, value, label, trend }) => <div className="card card-pad metric-card" key={label}><span className="metric-icon"><Icon size={15} /></span><div className="metric-value">{value}</div><div className="metric-label">{label}</div><span className="metric-trend">{trend}</span></div>)}
       </div>
@@ -37,9 +37,9 @@ export default function OverviewPage() {
           </div>
         </section>
         <section className="card card-pad">
-          <div className="card-head"><div><div className="card-note">Live log</div><h2 className="section-title" style={{ marginTop: 5 }}>Agent activity</h2></div><Link href="/network" className="tag">Live</Link></div>
+          <div className="card-head"><div><div className="card-note">Live log</div><h2 className="section-title" style={{ marginTop: 5 }}>Agent activity</h2></div><span className="tag">Live</span></div>
           {activity.map(({ icon: Icon, agent, copy, time }) => <div className="activity-row" key={agent + time}><div className="agent-avatar"><Icon size={14} /></div><div className="activity-copy"><strong>{agent}</strong> {copy}</div><div className="activity-time">{time}</div></div>)}
-          <Link href="/studio/launch" className="button button-ghost" style={{ width: '100%', marginTop: 13 }}><WandSparkles size={13} /> Open content studio</Link>
+          <Link href="/plan" className="button button-ghost" style={{ width: '100%', marginTop: 13 }}><WandSparkles size={13} /> Open the campaign plan</Link>
         </section>
       </div>
     </div>

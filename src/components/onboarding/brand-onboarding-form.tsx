@@ -659,7 +659,7 @@ export function BrandOnboardingForm({
                 <span><strong>{result?.brandName ?? companyName}</strong><small>{result?.evidence.length ?? 0} evidence points · {result?.sources.filter((source) => source.status !== "failed").length ?? 0} sources</small></span>
               </div>
               <button type="button" onClick={() => router.push("/brand")}>Open brand memory <ArrowRight size={13} /></button>
-              <button type="button" className="secondary" onClick={() => router.push("/network")}>Talk to your CMO</button>
+              <button type="button" className="secondary" onClick={() => router.push("/cmo")}>Talk to your CMO</button>
             </footer>
           )}
         </div>
