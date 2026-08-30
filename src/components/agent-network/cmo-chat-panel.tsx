@@ -230,17 +230,23 @@ function AgentActivity({ events, running }: { events: DevTraceEvent[]; running: 
 }
 
 
-/** Thousands separators keep six-figure token counts readable at 9px. */
-function tokenCount(value: number): string {
-  return value >= 10_000
-    ? `${(value / 1_000).toFixed(1)}k`
-    : value.toLocaleString("en-GB");
+/**
+ * A fixed estimate, not a live rate. Model prices are quoted in USD, so this
+ * only converts them for reading; change it here or set NEXT_PUBLIC_MYR_PER_USD.
+ */
+const MYR_PER_USD = Number(process.env.NEXT_PUBLIC_MYR_PER_USD ?? "4.7");
+
+function thousandsOfTokens(value: number): string {
+  return value < 1_000
+    ? `${value}`
+    : `${(value / 1_000).toFixed(value < 10_000 ? 1 : 0)}K`;
 }
 
-/** Sub-cent spend is the normal case, so it needs more than two decimals. */
-function usd(value: number): string {
-  if (value === 0) return "$0.00";
-  return value < 0.01 ? `$${value.toFixed(4)}` : `$${value.toFixed(2)}`;
+/** Sub-sen spend is the normal case, so two decimals would read as RM0.00. */
+function ringgit(usdValue: number): string {
+  const myr = usdValue * MYR_PER_USD;
+  if (myr === 0) return "RM0.00";
+  return myr < 0.01 ? `RM${myr.toFixed(4)}` : `RM${myr.toFixed(2)}`;
 }
 
 export function CmoChatPanel({
@@ -581,15 +587,6 @@ export function CmoChatPanel({
           <strong>CMO Agent</strong>
           <span><i /> {brand?.name ?? "Connecting to brand memory"}</span>
         </div>
-        {spend.costUsd > 0 && (
-          <div
-            className="cmo-spend"
-            title={`${spend.inputTokens.toLocaleString("en-GB")} in · ${spend.outputTokens.toLocaleString("en-GB")} out · this conversation`}
-          >
-            <b>{usd(spend.costUsd)}</b>
-            <small>{tokenCount(spend.inputTokens + spend.outputTokens)} tokens</small>
-          </div>
-        )}
         <div className="cmo-chat-actions">
           <button
             type="button"
@@ -983,6 +980,16 @@ export function CmoChatPanel({
           <Send size={15} />
         </button>
         <small>Enter to send · Shift + Enter for a new line</small>
+        {spend.inputTokens + spend.outputTokens > 0 && (
+          <small
+            className="cmo-spend"
+            title={`${spend.inputTokens.toLocaleString("en-GB")} in · ${spend.outputTokens.toLocaleString("en-GB")} out · estimated at RM${MYR_PER_USD} to the US dollar`}
+          >
+            {thousandsOfTokens(spend.inputTokens + spend.outputTokens)} tokens
+            {" · est. "}
+            <b>{ringgit(spend.costUsd)}</b>
+          </small>
+        )}
       </form>
     </aside>
   );

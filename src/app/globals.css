@@ -299,7 +299,7 @@ h2, h3, p { margin-top: 0; }
 /* The header spans the full width: centring it with the message column left
    the title floating in the middle while Clear sat at the far edge. */
 .cmo-chat-panel.workspace .cmo-chat-header {
-  grid-template-columns: 36px minmax(0,1fr) auto auto; min-height: 54px;
+  grid-template-columns: 36px minmax(0,1fr) auto; min-height: 54px;
   padding: 9px 22px; gap: 10px;
 }
 .cmo-chat-panel.workspace .cmo-chat-avatar { width: 36px; height: 36px; border-radius: 10px; }
@@ -313,6 +313,8 @@ h2, h3, p { margin-top: 0; }
 }
 .cmo-chat-panel.workspace .cmo-chat-form > button { top: 24px; right: calc(max(26px, (100% - 860px) / 2) + 10px); width: 36px; height: 36px; }
 .cmo-chat-panel.workspace .cmo-chat-form > small { left: max(26px, calc((100% - 860px) / 2)); bottom: 11px; font-size: 9px; }
+/* Outranks the rule above, which would otherwise stack both hints on the left. */
+.cmo-chat-panel.workspace .cmo-chat-form > small.cmo-spend { left: auto; right: max(26px, calc((100% - 860px) / 2)); }
 
 /* Reading sizes. The compact drawer keeps its own scale. */
 .cmo-chat-panel.workspace .cmo-chat-message { max-width: 82%; margin-bottom: 22px; }
@@ -355,7 +357,7 @@ h2, h3, p { margin-top: 0; }
 .agent-activity.done .agent-chip { background: #fafbf8; box-shadow: none; }
 .agent-activity.done .agent-chip small { color: #8d968f; }
 
-.cmo-chat-header { min-height:78px; display:grid; grid-template-columns:39px minmax(0,1fr) auto auto; align-items:center; gap:11px; padding:15px 16px; color:white; background:var(--navy); border-bottom:1px solid rgba(255,255,255,.08); }
+.cmo-chat-header { min-height:78px; display:grid; grid-template-columns:39px minmax(0,1fr) auto; align-items:center; gap:11px; padding:15px 16px; color:white; background:var(--navy); border-bottom:1px solid rgba(255,255,255,.08); }
 .cmo-chat-avatar { width:39px; height:39px; display:grid; place-items:center; color:var(--navy); background:var(--lime); border-radius:12px; box-shadow:0 0 24px rgba(200,241,105,.16); }
 .cmo-chat-header strong { display:block; font-family:Georgia,serif; font-size:17px; font-weight:500; }
 .cmo-chat-header span { display:flex; align-items:center; gap:6px; margin-top:4px; color:#9eaca7; font-size:9px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -363,9 +365,8 @@ h2, h3, p { margin-top: 0; }
 .cmo-chat-close { width:32px; height:32px; display:grid; place-items:center; color:#a8b5b1; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.08); border-radius:9px; cursor:pointer; }
 .cmo-chat-close:hover { color:white; background:rgba(255,255,255,.11); }
 .cmo-chat-actions { display:flex; align-items:center; gap:7px; }
-.cmo-spend { display:grid; gap:1px; padding:5px 10px; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.09); border-radius:9px; text-align:right; cursor:default; }
-.cmo-spend b { color:#e9f3e3; font-size:11px; font-weight:600; font-variant-numeric:tabular-nums; }
-.cmo-spend small { color:#93a29d; font-size:8px; font-variant-numeric:tabular-nums; }
+.cmo-chat-form > small.cmo-spend { left:auto; right:16px; color:#8b948f; font-variant-numeric:tabular-nums; cursor:default; }
+.cmo-chat-form > small.cmo-spend b { color:#4f5f57; font-weight:650; }
 .cmo-chat-clear { display:flex; align-items:center; gap:5px; height:32px; padding:0 10px; color:#a8b5b1; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.08); border-radius:9px; font-size:9px; letter-spacing:.05em; text-transform:uppercase; cursor:pointer; transition:color .15s ease, background .15s ease; }
 .cmo-chat-clear:hover:not(:disabled) { color:white; background:rgba(255,255,255,.11); }
 .cmo-chat-clear:disabled { opacity:.38; cursor:not-allowed; }
