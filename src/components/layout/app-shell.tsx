@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
-  Activity, BarChart3, BrainCircuit, CalendarDays, ChevronDown,
+  BarChart3, BrainCircuit, CalendarDays,
   MessageCircle, ScanSearch, Sparkles,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -60,17 +60,6 @@ export function AppShell({ children }: { children: ReactNode }) {
           ))}
         </nav>
         <div className="sidebar-spacer" />
-        <div className="usage-card">
-          <div className="usage-top"><span>AI spend this week</span><Activity size={12} /></div>
-          <div className="usage-cost">$3.42</div>
-          <div className="usage-bar"><span /></div>
-          <div className="usage-top" style={{ marginTop: 7 }}><span>18% of $20 limit</span><span>Live</span></div>
-        </div>
-        <div className="sidebar-profile">
-          <div className="avatar">AK</div>
-          <div className="profile-meta"><div className="profile-name">Alex Kim</div><div className="profile-role">Marketing lead</div></div>
-          <ChevronDown size={13} color="#84928f" />
-        </div>
       </aside>
       <div className="main-column">
         <header className="topbar">
