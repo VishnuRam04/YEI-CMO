@@ -26,6 +26,14 @@ export interface BrandJudgeReport {
   notes: string[];
 }
 
+/** Tokens a judging call spent, so the asset it reviewed can be priced. */
+export interface JudgeUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export const NO_USAGE: JudgeUsage = { inputTokens: 0, outputTokens: 0 };
+
 /** The slice of brand memory the judge is allowed to reason from. */
 export interface JudgeableBrandMemory {
   // Extra fields are expected and are forwarded to the judge verbatim; only
@@ -250,7 +258,7 @@ export async function judgeAgainstBrandMemory(
   items: Array<{ id: string; content: string }>,
   channel: string,
   kind: ContentKind = "caption",
-): Promise<Map<string, BrandJudgeCriterion[]>> {
+): Promise<{ byId: Map<string, BrandJudgeCriterion[]>; usage: JudgeUsage }> {
   const call = await generateText({
     model: model(MODELS.judge),
     prompt: buildBrandJudgePrompt(memory, items, channel, kind),
@@ -261,6 +269,10 @@ export async function judgeAgainstBrandMemory(
     providerOptions: { google: { thinkingConfig: { thinkingLevel: "low" } } },
   });
   const judged = JudgementSchema.parse(call.output);
+  const usage: JudgeUsage = {
+    inputTokens: call.usage.inputTokens ?? 0,
+    outputTokens: call.usage.outputTokens ?? 0,
+  };
   const byId = new Map<string, BrandJudgeCriterion[]>();
   for (const item of judged.items) {
     byId.set(item.id, [
@@ -270,7 +282,7 @@ export async function judgeAgainstBrandMemory(
       criterion("tone", item.tone.score, [item.tone.reason]),
     ]);
   }
-  return byId;
+  return { byId, usage };
 }
 
 const VisualJudgementSchema = z.object({
@@ -360,7 +372,7 @@ export async function judgeRenderedPoster(
   image: { bytes: Uint8Array; mediaType: string },
   expectedWords: string[],
   logoIsAuthentic = false,
-): Promise<BrandJudgeCriterion[]> {
+): Promise<{ criteria: BrandJudgeCriterion[]; usage: JudgeUsage }> {
   const call = await generateText({
     model: model(MODELS.judge),
     messages: [{
@@ -377,13 +389,17 @@ export async function judgeRenderedPoster(
     providerOptions: { google: { thinkingConfig: { thinkingLevel: "low" } } },
   });
   const judged = VisualJudgementSchema.parse(call.output);
+  const usage: JudgeUsage = {
+    inputTokens: call.usage.inputTokens ?? 0,
+    outputTokens: call.usage.outputTokens ?? 0,
+  };
   // The reader is not perfectly reliable at this, and it has flagged correctly
   // spelled words. One flag should dent the score, not fail the poster; a
   // genuinely broken render trips several at once and still fails.
   const spellingScore = judged.misspelledWords.length
     ? Math.max(0, 100 - judged.misspelledWords.length * 15)
     : 100;
-  return [
+  return { usage, criteria: [
     criterion("visual", Math.round(
       (judged.palette.score + judged.logo.score + judged.motif.score) / 3,
     ), [judged.palette.reason, judged.logo.reason, judged.motif.reason]),
@@ -393,7 +409,7 @@ export async function judgeRenderedPoster(
         ? `Words rendered incorrectly: ${judged.misspelledWords.join(", ")}`
         : "Every visible word matches the approved wording.",
     ]),
-  ];
+  ] };
 }
 
 export function buildReport(criteria: BrandJudgeCriterion[]): BrandJudgeReport {
@@ -427,11 +443,14 @@ export async function reviewContent(
   items: Array<{ id: string; content: string }>,
   channel: string,
   kind: ContentKind = "caption",
-): Promise<Map<string, BrandJudgeReport>> {
+): Promise<{ reports: Map<string, BrandJudgeReport>; usage: JudgeUsage }> {
   let semantic = new Map<string, BrandJudgeCriterion[]>();
+  let usage: JudgeUsage = NO_USAGE;
   let judgeFailure = "";
   try {
-    semantic = await judgeAgainstBrandMemory(memory, items, channel, kind);
+    const judged = await judgeAgainstBrandMemory(memory, items, channel, kind);
+    semantic = judged.byId;
+    usage = judged.usage;
   } catch (error) {
     judgeFailure = error instanceof Error ? error.message : String(error);
     console.error("[brand-judge] semantic review unavailable.", error);
@@ -457,5 +476,5 @@ export async function reviewContent(
         }
       : report);
   }
-  return reports;
+  return { reports, usage };
 }

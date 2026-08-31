@@ -267,6 +267,9 @@ async function runTextGeneration(
   const brandJudgeAttempts = 3;
   let finalVariants: TextVariant[] | null = null;
   let finalUsage = { inputTokens: 0, outputTokens: 0 };
+  // The Brand Judge runs on its own model inside this agent; without counting
+  // it the reported cost of a finished asset is simply wrong.
+  const judgeUsage = { inputTokens: 0, outputTokens: 0 };
   let finalAudit: BrandAuditReport[] = [];
   let promptForNextAttempt = buildUserPrompt(payload);
   let lastReviewDetail = "";
@@ -359,11 +362,14 @@ async function runTextGeneration(
 
     // All three variants are judged in one call: the review is comparative and
     // should not cost a round trip per variant.
-    const reports = await reviewContent(
+    const review = await reviewContent(
       memory,
       variants.map((variant) => ({ id: variant.angle, content: persistedText(variant) })),
       payload.channel,
     );
+    const reports = review.reports;
+    judgeUsage.inputTokens += review.usage.inputTokens;
+    judgeUsage.outputTokens += review.usage.outputTokens;
     const reviews = variants.map((variant) => ({
       variant,
       report: reports.get(variant.angle) ?? buildReport([]),
@@ -440,8 +446,8 @@ async function runTextGeneration(
       brandAudit: finalAudit,
     },
     summary: `3 variants - ${finalVariants.map((variant) => variant.angle).join("/")}`,
-    inputTokens: finalUsage.inputTokens,
-    outputTokens: finalUsage.outputTokens,
+    inputTokens: finalUsage.inputTokens + judgeUsage.inputTokens,
+    outputTokens: finalUsage.outputTokens + judgeUsage.outputTokens,
   });
 }
 
@@ -531,6 +537,9 @@ async function runImageGeneration(
   // artwork cannot be edited afterwards, which is why this is gated at all.
   let posterAudit: BrandAuditReport[] = [];
   let wordingCriteria: BrandAuditReport["criteria"] = [];
+  // Every model call a poster makes - wording, its review, the render and the
+  // visual review - so the finished asset can be priced honestly.
+  const assetUsage = { inputTokens: 0, outputTokens: 0 };
   if (!posterCopy && payload.posterSource) {
     const posterCopyAttempts = 3;
     let lastFailure = "";
@@ -550,6 +559,8 @@ async function runImageGeneration(
           providerOptions: { google: { thinkingConfig: { thinkingLevel: "low" } } },
         });
         candidate = PosterCopySchema.parse(written.output);
+        assetUsage.inputTokens += written.usage.inputTokens ?? 0;
+        assetUsage.outputTokens += written.usage.outputTokens ?? 0;
       } catch (error) {
         lastFailure = error instanceof Error ? error.message : String(error);
         console.error(`[copywriter] poster wording attempt ${attempt} did not parse.`, error);
@@ -562,7 +573,7 @@ async function runImageGeneration(
         callToAction: candidate.callToAction,
         highlights: candidate.highlights,
       };
-      const reports = await reviewContent(
+      const review = await reviewContent(
         memory,
         [{
           id: "poster",
@@ -576,7 +587,9 @@ async function runImageGeneration(
         "instagram",
         "poster",
       );
-      const report = reports.get("poster") ?? buildReport([]);
+      assetUsage.inputTokens += review.usage.inputTokens;
+      assetUsage.outputTokens += review.usage.outputTokens;
+      const report = review.reports.get("poster") ?? buildReport([]);
       posterAudit = [{
         angle: "poster",
         passed: report.passed,
@@ -675,6 +688,8 @@ ${corrections.map((note) => `- ${note}`).join(NEWLINE)}`;
         google: { responseModalities: ["IMAGE"] },
       },
     });
+    assetUsage.inputTokens += generated.usage.inputTokens ?? 0;
+    assetUsage.outputTokens += generated.usage.outputTokens ?? 0;
     const generatedFile = generated.files.find((entry) => entry.mediaType.startsWith("image/"));
     if (!generatedFile) {
       corrections = ["No image was produced. Return a single poster image."];
@@ -704,7 +719,7 @@ ${corrections.map((note) => `- ${note}`).join(NEWLINE)}`;
     }
 
     try {
-      const visual = await judgeRenderedPoster(
+      const visualReview = await judgeRenderedPoster(
         memory,
         { bytes: file.uint8Array, mediaType: file.mediaType },
         [
@@ -715,6 +730,9 @@ ${corrections.map((note) => `- ${note}`).join(NEWLINE)}`;
         ].filter(Boolean),
         Boolean(brandLogo),
       );
+      assetUsage.inputTokens += visualReview.usage.inputTokens;
+      assetUsage.outputTokens += visualReview.usage.outputTokens;
+      const visual = visualReview.criteria;
       // The wording verdict is fixed once accepted. Re-reading it off the
       // previous attempt's combined report duplicated criteria every pass.
       const combined = buildReport([
@@ -815,8 +833,8 @@ ${corrections.map((note) => `- ${note}`).join(NEWLINE)}`;
       brandAudit: posterAudit,
     },
     summary: `1 image - ${tier} - ${stored.backend} - ${posterAudit[0]?.overallScore ?? "unjudged"}/100`,
-    inputTokens: 0,
-    outputTokens: 0,
+    inputTokens: assetUsage.inputTokens,
+    outputTokens: assetUsage.outputTokens,
   });
 }
 
@@ -845,6 +863,7 @@ async function runScriptGeneration(
 
   const memory = brandMemory(brand);
   const durationSeconds = payload.durationSeconds ?? 30;
+  const scriptUsage = { inputTokens: 0, outputTokens: 0 };
   let script;
   try {
     const call = await generateText({
@@ -857,6 +876,8 @@ async function runScriptGeneration(
       providerOptions: { google: { thinkingConfig: { thinkingLevel: "low" } } },
     });
     script = ScriptSchema.parse(call.output);
+    scriptUsage.inputTokens += call.usage.inputTokens ?? 0;
+    scriptUsage.outputTokens += call.usage.outputTokens ?? 0;
   } catch (error) {
     return agentFailure({
       agentId: "copywriter",
@@ -879,8 +900,10 @@ async function runScriptGeneration(
     ...script.scenes.map((scene) => scene.saidOrShown),
     script.callToAction,
   ].join("\n");
-  const reports = await reviewContent(memory, [{ id: "script", content: spoken }], "instagram");
-  const report = reports.get("script") ?? buildReport([]);
+  const review = await reviewContent(memory, [{ id: "script", content: spoken }], "instagram");
+  scriptUsage.inputTokens += review.usage.inputTokens;
+  scriptUsage.outputTokens += review.usage.outputTokens;
+  const report = review.reports.get("script") ?? buildReport([]);
   const brandAudit: BrandAuditReport[] = [{
     angle: "script",
     passed: report.passed,
@@ -922,8 +945,8 @@ async function runScriptGeneration(
       brandAudit,
     },
     summary: `${script.scenes.length} shots - ${report.overallScore}/100`,
-    inputTokens: 0,
-    outputTokens: 0,
+    inputTokens: scriptUsage.inputTokens,
+    outputTokens: scriptUsage.outputTokens,
   });
 }
 

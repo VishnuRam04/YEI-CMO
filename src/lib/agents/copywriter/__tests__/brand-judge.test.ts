@@ -88,9 +88,9 @@ describe("review when the judge model is unreachable", () => {
   it("refuses to report a pass it did not verify", async () => {
     // A judge outage must not become a silent green tick on unreviewed content.
     vi.spyOn(console, "error").mockImplementation(() => {});
-    const reports = await reviewContent(
+    const review = await reviewContent(
       memory, [{ id: "a", content: "Watch them pour their own drink." }], "instagram");
-    const report = reports.get("a")!;
+    const report = review.reports.get("a")!;
     const unreviewed = report.notes.some((note) =>
       note.includes("Not reviewed against brand memory"));
     if (unreviewed) {
